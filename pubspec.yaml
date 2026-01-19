@@ -16,6 +16,9 @@ dependencies:
   sqflite_common_ffi_web: ^1.0.4
   path: ^1.8.3
   
+  # Web版用のストレージ（フォールバック）
+  shared_preferences: ^2.2.2
+  
   # UI
   intl: ^0.18.1
   
