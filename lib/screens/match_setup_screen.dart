@@ -37,20 +37,15 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
 
   Future<void> _saveAndStart() async {
     if (_formKey.currentState!.validate()) {
+      // バリデーションが成功した場合のみ、すべてのフィールドが入力されている
       final match = Match(
-        tournamentName: _tournamentController.text.trim().isEmpty
-            ? null
-            : _tournamentController.text.trim(),
+        tournamentName: _tournamentController.text.trim(),
         team1Player1: _team1Player1Controller.text.trim(),
         team1Player2: _team1Player2Controller.text.trim(),
-        team1Club: _team1ClubController.text.trim().isEmpty
-            ? null
-            : _team1ClubController.text.trim(),
+        team1Club: _team1ClubController.text.trim(),
         team2Player1: _team2Player1Controller.text.trim(),
         team2Player2: _team2Player2Controller.text.trim(),
-        team2Club: _team2ClubController.text.trim().isEmpty
-            ? null
-            : _team2ClubController.text.trim(),
+        team2Club: _team2ClubController.text.trim(),
         gameCount: _gameCount,
         firstServe: _firstServe,
         createdAt: DateTime.now(),
@@ -96,11 +91,17 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
         child: ListView(
           padding: const EdgeInsets.all(24),
           children: [
-            // 大会名
+            // 大会・イベント名
             _buildSection(
-              'Tournament',
+              '大会・イベント名',
               TextFormField(
                 controller: _tournamentController,
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return '大会・イベント名を入力してください';
+                  }
+                  return null;
+                },
                 decoration: const InputDecoration(
                   hintText: '大会名を入力',
                   filled: true,
@@ -113,6 +114,14 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                     borderSide: BorderSide(color: Color(0xFF333333)),
                     borderRadius: BorderRadius.all(Radius.circular(12)),
                   ),
+                  errorBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.red),
+                    borderRadius: BorderRadius.all(Radius.circular(12)),
+                  ),
+                  focusedErrorBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.red),
+                    borderRadius: BorderRadius.all(Radius.circular(12)),
+                  ),
                   contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 style: const TextStyle(fontSize: 14),
@@ -121,7 +130,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
             const SizedBox(height: 40),
             // ペアA
             _buildPairSection(
-              'Pair A',
+              'ペアA',
               _team1Player1Controller,
               _team1Player2Controller,
               _team1ClubController,
@@ -130,7 +139,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
             const SizedBox(height: 40),
             // ペアB
             _buildPairSection(
-              'Pair B',
+              'ペアB',
               _team2Player1Controller,
               _team2Player2Controller,
               _team2ClubController,
@@ -138,7 +147,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
             ),
             const SizedBox(height: 40),
             // ゲーム数
-            _buildGameCountSection(),
+            _buildGameCountSection('ゲーム数'),
             const SizedBox(height: 100),
           ],
         ),
@@ -155,44 +164,27 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
             ),
           ],
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _saveAndStart,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF000000),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text(
-                  '保存して戻る',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: 2.4,
-                  ),
-                ),
+        child: SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: _saveAndStart,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF000000),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
               ),
             ),
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text(
-                'キャンセル',
-                style: TextStyle(
-                  color: Color(0xFF7F7F7F),
-                  fontSize: 14,
-                  letterSpacing: 2.4,
-                ),
+            child: const Text(
+              '試合を開始する',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 2.4,
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -271,7 +263,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        _buildClubField(clubController),
+        _buildClubField(clubController, label),
       ],
     );
   }
@@ -294,7 +286,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
           controller: controller,
           validator: (value) {
             if (value == null || value.trim().isEmpty) {
-              return '必須';
+              return '名前を入力してください';
             }
             return null;
           },
@@ -310,6 +302,14 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
               borderSide: BorderSide(color: Color(0xFF333333)),
               borderRadius: BorderRadius.all(Radius.circular(12)),
             ),
+            errorBorder: OutlineInputBorder(
+              borderSide: BorderSide(color: Colors.red),
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderSide: BorderSide(color: Colors.red),
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+            ),
             contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
           style: const TextStyle(fontSize: 16),
@@ -318,51 +318,50 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
     );
   }
 
-  Widget _buildClubField(TextEditingController controller) {
+  Widget _buildClubField(TextEditingController controller, String teamLabel) {
+    return TextFormField(
+      controller: controller,
+      validator: (value) {
+        if (value == null || value.trim().isEmpty) {
+          return '$teamLabelの所属名を入力してください';
+        }
+        return null;
+      },
+      decoration: const InputDecoration(
+        hintText: '所属名を入力',
+        filled: true,
+        fillColor: Color(0xFFF9F9F9),
+        border: OutlineInputBorder(
+          borderSide: BorderSide(color: Color(0xFFE0E0E0)),
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderSide: BorderSide(color: Color(0xFF333333)),
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderSide: BorderSide(color: Colors.red),
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderSide: BorderSide(color: Colors.red),
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      ),
+      style: const TextStyle(fontSize: 14),
+    );
+  }
+
+  Widget _buildGameCountSection(String label) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 6),
-          child: const Text(
-            '学校・クラブ名',
-            style: TextStyle(
-              fontSize: 10,
-              color: Color(0xFF7F7F7F),
-            ),
-          ),
-        ),
-        TextFormField(
-          controller: controller,
-          decoration: const InputDecoration(
-            hintText: 'ペア共通の所属名を入力',
-            filled: true,
-            fillColor: Color(0xFFF9F9F9),
-            border: OutlineInputBorder(
-              borderSide: BorderSide(color: Color(0xFFE0E0E0)),
-              borderRadius: BorderRadius.all(Radius.circular(12)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderSide: BorderSide(color: Color(0xFF333333)),
-              borderRadius: BorderRadius.all(Radius.circular(12)),
-            ),
-            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          ),
-          style: const TextStyle(fontSize: 14),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildGameCountSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.only(left: 4, bottom: 16),
+          padding: const EdgeInsets.only(left: 4, bottom: 16),
           child: Text(
-            'Game Count',
-            style: TextStyle(
+            label,
+            style: const TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.bold,
               letterSpacing: 2.4,

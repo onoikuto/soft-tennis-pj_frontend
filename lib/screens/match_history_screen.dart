@@ -87,7 +87,7 @@ class _MatchHistoryScreenState extends State<MatchHistoryScreen> {
                         child: ListTile(
                           contentPadding: const EdgeInsets.all(16),
                           title: Text(
-                            match.tournamentName ?? '試合',
+                            match.tournamentName.isNotEmpty ? match.tournamentName : '試合',
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
@@ -98,7 +98,7 @@ class _MatchHistoryScreenState extends State<MatchHistoryScreen> {
                             children: [
                               const SizedBox(height: 8),
                               Text(
-                                '${match.team1Player1} / ${match.team1Player2}${match.team1Club != null ? ' (${match.team1Club})' : ''}',
+                                match.team1DisplayName,
                               ),
                               Text(
                                 'vs',
@@ -108,7 +108,7 @@ class _MatchHistoryScreenState extends State<MatchHistoryScreen> {
                                 ),
                               ),
                               Text(
-                                '${match.team2Player1} / ${match.team2Player2}${match.team2Club != null ? ' (${match.team2Club})' : ''}',
+                                match.team2DisplayName,
                               ),
                               const SizedBox(height: 8),
                               Text(
