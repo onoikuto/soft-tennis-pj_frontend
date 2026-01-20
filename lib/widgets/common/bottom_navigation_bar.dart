@@ -30,7 +30,6 @@ class SimpleBottomNavigationBar extends StatelessWidget {
               _buildNavItem(Icons.history, '履歴', 1),
               _buildNavItem(Icons.analytics, '統計', 2),
               _buildNavItem(Icons.person, 'マイページ', 3),
-              _buildNavItem(Icons.settings, '設定', 4),
             ],
           ),
         ),

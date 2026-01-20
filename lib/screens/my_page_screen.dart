@@ -1,8 +1,48 @@
 import 'package:flutter/material.dart';
 import 'package:soft_tennis_scoring/screens/backup_screen.dart';
+import 'package:soft_tennis_scoring/screens/account_settings_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-class MyPageScreen extends StatelessWidget {
+class MyPageScreen extends StatefulWidget {
   const MyPageScreen({super.key});
+
+  @override
+  State<MyPageScreen> createState() => _MyPageScreenState();
+}
+
+class _MyPageScreenState extends State<MyPageScreen> {
+  String _lastName = '';
+  String _firstName = '';
+  String _team = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAccountSettings();
+  }
+
+  Future<void> _loadAccountSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _lastName = prefs.getString('account_last_name') ?? '';
+      _firstName = prefs.getString('account_first_name') ?? '';
+      _team = prefs.getString('account_team') ?? '';
+    });
+  }
+
+  String get _displayName {
+    if (_lastName.isEmpty && _firstName.isEmpty) {
+      return '佐藤 健太'; // デフォルト値
+    }
+    if (_firstName.isEmpty) {
+      return _lastName;
+    }
+    return '$_lastName $_firstName';
+  }
+
+  String get _displayTeam {
+    return _team.isEmpty ? '早稲田ソフトテニスクラブ' : _team; // デフォルト値
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,41 +68,23 @@ class MyPageScreen extends StatelessWidget {
             color: Colors.white,
             padding: const EdgeInsets.all(24),
             margin: const EdgeInsets.only(bottom: 24),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF7F7F7),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.person,
-                    size: 32,
-                    color: Colors.grey,
+                Text(
+                  _displayName,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(width: 20),
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '佐藤 健太',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      '早稲田ソフトテニスクラブ',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey,
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 4),
+                Text(
+                  _displayTeam,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey,
+                  ),
                 ),
               ],
             ),
@@ -73,12 +95,18 @@ class MyPageScreen extends StatelessWidget {
               _buildMenuItem(
                 Icons.manage_accounts,
                 'アカウント設定',
-                () {},
-              ),
-              _buildMenuItem(
-                Icons.mail,
-                'お問い合わせ',
-                () {},
+                () async {
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const AccountSettingsScreen(),
+                    ),
+                  );
+                  // 設定が保存された場合、プロフィール情報を再読み込み
+                  if (result == true) {
+                    _loadAccountSettings();
+                  }
+                },
               ),
             ],
           ),
@@ -134,18 +162,6 @@ class MyPageScreen extends StatelessWidget {
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 24),
-          // ログアウト
-          _buildSection(
-            [
-              _buildMenuItem(
-                Icons.logout,
-                'ログアウト',
-                () {},
-                textColor: Colors.red,
-              ),
-            ],
           ),
           const SizedBox(height: 48),
           // バージョン情報

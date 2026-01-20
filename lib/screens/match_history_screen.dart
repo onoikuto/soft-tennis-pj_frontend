@@ -30,6 +30,54 @@ class _MatchHistoryScreenState extends State<MatchHistoryScreen> {
     });
   }
 
+  /// 削除確認ダイアログを表示
+  Future<void> _showDeleteDialog(Match match) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('試合を削除しますか？'),
+          content: const Text(
+            'この試合を削除すると、統計データからも削除されます。\n'
+            'この操作は取り消せません。\n'
+            '本当に削除してよろしいですか？',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('キャンセル'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.red,
+              ),
+              child: const Text('削除する'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete == true && match.id != null) {
+      // 試合を削除（関連するゲームスコアも削除される）
+      await DatabaseHelper.instance.deleteMatch(match.id!);
+      
+      // リストを更新
+      if (mounted) {
+        _loadMatches();
+        
+        // 削除完了のスナックバーを表示
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('試合を削除しました'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -121,21 +169,35 @@ class _MatchHistoryScreenState extends State<MatchHistoryScreen> {
                               ),
                             ],
                           ),
-                          trailing: match.winner != null
-                              ? Chip(
-                                  label: Text(
-                                    match.winner == 'team1' ? 'チーム1勝利' : 'チーム2勝利',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                  backgroundColor: Colors.green[100],
-                                )
-                              : const Chip(
-                                  label: Text(
-                                    '進行中',
-                                    style: TextStyle(fontSize: 12),
-                                  ),
-                                  backgroundColor: Colors.orange,
-                                ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              match.completedAt != null
+                                  ? Chip(
+                                      label: Text(
+                                        match.winner != null
+                                            ? (match.winner == 'team1' ? 'チーム1勝利' : 'チーム2勝利')
+                                            : '終了',
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
+                                      backgroundColor: Colors.green[100],
+                                    )
+                                  : Chip(
+                                      label: const Text(
+                                        '進行中',
+                                        style: TextStyle(fontSize: 12),
+                                      ),
+                                      backgroundColor: Colors.orange[100],
+                                    ),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                onPressed: () => _showDeleteDialog(match),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                              ),
+                            ],
+                          ),
                           onTap: () {
                             Navigator.push(
                               context,

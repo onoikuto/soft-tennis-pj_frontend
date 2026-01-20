@@ -3,7 +3,6 @@ import 'package:soft_tennis_scoring/screens/match_history_screen.dart';
 import 'package:soft_tennis_scoring/screens/match_setup_screen.dart';
 import 'package:soft_tennis_scoring/screens/statistics_screen.dart';
 import 'package:soft_tennis_scoring/screens/my_page_screen.dart';
-import 'package:soft_tennis_scoring/screens/settings_screen.dart';
 import 'package:soft_tennis_scoring/widgets/common/bottom_navigation_bar.dart';
 import 'package:soft_tennis_scoring/widgets/common/simple_button.dart';
 
@@ -17,12 +16,11 @@ class MainMenuScreen extends StatefulWidget {
 class _MainMenuScreenState extends State<MainMenuScreen> {
   int _currentIndex = 0;
 
-  final List<Widget> _screens = [
-    const _HomeContent(),
+  List<Widget> get _screens => [
+    _HomeContent(onNavigateToIndex: (index) => setState(() => _currentIndex = index)),
     const MatchHistoryScreen(),
     const StatisticsScreen(),
     const MyPageScreen(),
-    const SettingsScreen(),
   ];
 
   @override
@@ -43,7 +41,9 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
 }
 
 class _HomeContent extends StatelessWidget {
-  const _HomeContent();
+  final ValueChanged<int> onNavigateToIndex;
+
+  const _HomeContent({required this.onNavigateToIndex});
 
   @override
   Widget build(BuildContext context) {
@@ -90,12 +90,8 @@ class _HomeContent extends StatelessWidget {
                     title: '過去の試合一覧',
                     subtitle: 'Match History',
                     onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const MatchHistoryScreen(),
-                        ),
-                      );
+                      // ボトムナビゲーションバーの「履歴」タブ（index 1）に切り替え
+                      onNavigateToIndex(1);
                     },
                   ),
                   const SizedBox(height: 16),
@@ -103,12 +99,8 @@ class _HomeContent extends StatelessWidget {
                     title: '統計データ',
                     subtitle: 'Statistics',
                     onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const StatisticsScreen(),
-                        ),
-                      );
+                      // ボトムナビゲーションバーの「統計」タブ（index 2）に切り替え
+                      onNavigateToIndex(2);
                     },
                   ),
                   // 下部に余白を追加（ボトムナビゲーションバーの高さ分）

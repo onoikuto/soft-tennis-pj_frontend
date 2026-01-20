@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:soft_tennis_scoring/database/database_helper.dart';
 import 'package:soft_tennis_scoring/models/match.dart';
 import 'package:soft_tennis_scoring/models/game_score.dart';
+import 'package:soft_tennis_scoring/screens/main_menu_screen.dart';
 
 class OfficialScoringScreen extends StatefulWidget {
   final int matchId;
@@ -36,11 +37,16 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
       _gameScores = gameScores;
       
       // 試合の勝敗をチェック
-      final matchWinner = _checkMatchWinner();
-      if (matchWinner != null) {
+      // completedAtが設定されている場合、または試合の勝敗が決まっている場合は終了
+      if (match != null && match.completedAt != null) {
         _isMatchCompleted = true;
       } else {
-        _isMatchCompleted = false;
+        final matchWinner = _checkMatchWinner();
+        if (matchWinner != null) {
+          _isMatchCompleted = true;
+        } else {
+          _isMatchCompleted = false;
+        }
       }
       
       // 現在進行中のゲームを決定
@@ -363,6 +369,26 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
         team1Score = team2Score = 0;
       }
 
+      // 勝敗を再判定
+      String? winner;
+      final isFinalGame = _isFinalGame(lastGame.gameNumber);
+      
+      if (isFinalGame) {
+        // ファイナルゲーム: 先に7ポイント取った方が勝ち、デュースあり（2ポイント差が必要）
+        if (team1Score >= 7 && team1Score - team2Score >= 2) {
+          winner = 'team1';
+        } else if (team2Score >= 7 && team2Score - team1Score >= 2) {
+          winner = 'team2';
+        }
+      } else {
+        // 通常のゲーム: 4ポイント先取、デュースあり（2ポイント差が必要）
+        if (team1Score >= 4 && team1Score - team2Score >= 2) {
+          winner = 'team1';
+        } else if (team2Score >= 4 && team2Score - team1Score >= 2) {
+          winner = 'team2';
+        }
+      }
+
       final updatedGameScore = GameScore(
         id: lastGame.id,
         matchId: widget.matchId,
@@ -370,12 +396,33 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
         team1Score: team1Score,
         team2Score: team2Score,
         serviceTeam: lastGame.serviceTeam,
-        winner: null,
+        winner: winner,
       );
       await DatabaseHelper.instance.updateGameScore(updatedGameScore);
     }
 
     await _loadMatchData();
+    
+    // 試合の勝敗を再チェック（試合が終了していない場合、completedAtをクリア）
+    final matchWinner = _checkMatchWinner();
+    if (matchWinner == null && _match != null && _match!.completedAt != null) {
+      // 試合が終了していない状態に戻った場合、completedAtをクリア
+      final updatedMatch = Match(
+        id: _match!.id,
+        tournamentName: _match!.tournamentName,
+        team1Player1: _match!.team1Player1,
+        team1Player2: _match!.team1Player2,
+        team1Club: _match!.team1Club,
+        team2Player1: _match!.team2Player1,
+        team2Player2: _match!.team2Player2,
+        team2Club: _match!.team2Club,
+        gameCount: _match!.gameCount,
+        firstServe: _match!.firstServe,
+        createdAt: _match!.createdAt,
+        completedAt: null, // 試合を進行中に戻す
+      );
+      await DatabaseHelper.instance.updateMatch(updatedMatch);
+    }
   }
 
   @override
@@ -443,35 +490,50 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
             ),
           ],
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings, color: Color(0xFF333333)),
-            onPressed: () {},
-          ),
-        ],
       ),
       body: Column(
         children: [
           // スコアテーブル
           Expanded(
             child: SingleChildScrollView(
+              scrollDirection: Axis.vertical,
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  // スコアテーブル
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: const Color(0xFF333333)),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Table(
-                      border: TableBorder.all(
-                        color: const Color(0xFF333333),
-                        width: 0.5,
+                  // スコアテーブル（横スクロール可能）
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFF333333)),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      children: [
-                        // ヘッダー
-                        TableRow(
+                      child: Table(
+                        border: TableBorder.all(
+                          color: const Color(0xFF333333),
+                          width: 0.5,
+                        ),
+                        columnWidths: {
+                          // PLAYER列は固定幅
+                          0: const FixedColumnWidth(80),
+                          // S列は固定幅
+                          1: const FixedColumnWidth(30),
+                          // ゲーム列は固定幅（コンパクトに）
+                          2: const FixedColumnWidth(28),
+                          3: const FixedColumnWidth(28),
+                          4: const FixedColumnWidth(28),
+                          5: const FixedColumnWidth(28),
+                          6: const FixedColumnWidth(28),
+                          7: const FixedColumnWidth(28),
+                          8: const FixedColumnWidth(28),
+                          9: const FixedColumnWidth(28),
+                          10: const FixedColumnWidth(28),
+                          // ゲーム数列は固定幅
+                          11: const FixedColumnWidth(50),
+                        },
+                        children: [
+                          // ヘッダー
+                          TableRow(
                           decoration: const BoxDecoration(
                             color: Color(0xFFF9F9F9),
                           ),
@@ -489,9 +551,9 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
                             _buildTableHeader('9'),
                             _buildTableHeader('ゲーム数', isGames: true),
                           ],
-                        ),
-                        // チーム1
-                        TableRow(
+                          ),
+                          // チーム1
+                          TableRow(
                           children: [
                             _buildPlayerCell(
                               '${_match!.team1Player1}・${_match!.team1Player2}',
@@ -509,9 +571,9 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
                             _buildScoreCell(9, gameScoresMap, 'team1'),
                             _buildGamesCell(team1Games),
                           ],
-                        ),
-                        // チーム2
-                        TableRow(
+                          ),
+                          // チーム2
+                          TableRow(
                           children: [
                             _buildPlayerCell(
                               '${_match!.team2Player1}・${_match!.team2Player2}',
@@ -529,8 +591,9 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
                             _buildScoreCell(9, gameScoresMap, 'team2'),
                             _buildGamesCell(team2Games),
                           ],
-                        ),
-                      ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   const SizedBox(height: 24),
@@ -599,7 +662,7 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: _isMatchCompleted ? null : _undoLastPoint,
+                        onPressed: _undoLastPoint,
                         icon: const Icon(Icons.undo),
                         label: const Text('一つ戻る'),
                         style: OutlinedButton.styleFrom(
@@ -613,8 +676,103 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () {
-                          // TODO: 試合終了処理
+                        onPressed: () async {
+                          // 試合が終了していない場合は確認ダイアログを2回表示
+                          final matchWinner = _checkMatchWinner();
+                          if (matchWinner == null && _match != null && _match!.completedAt == null) {
+                            // 1回目の確認ダイアログを表示
+                            final shouldProceed = await showDialog<bool>(
+                              context: context,
+                              builder: (BuildContext context) {
+                                return AlertDialog(
+                                  title: const Text('試合を終了しますか？'),
+                                  content: const Text(
+                                    '試合がまだ終了していません。\n'
+                                    '本当に試合を終了してよろしいですか？',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.of(context).pop(false),
+                                      child: const Text('キャンセル'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.of(context).pop(true),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: Colors.red,
+                                      ),
+                                      child: const Text('終了する'),
+                                    ),
+                                  ],
+                                );
+                              },
+                            );
+                            
+                            // キャンセルされた場合は何もしない
+                            if (shouldProceed != true) {
+                              return;
+                            }
+                            
+                            // 2回目の確認ダイアログを表示
+                            final shouldComplete = await showDialog<bool>(
+                              context: context,
+                              builder: (BuildContext context) {
+                                return AlertDialog(
+                                  title: const Text('本当によろしいですか？'),
+                                  content: const Text(
+                                    '試合を終了すると、スコアの変更ができなくなります。\n'
+                                    '本当に終了してよろしいですか？',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.of(context).pop(false),
+                                      child: const Text('キャンセル'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.of(context).pop(true),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: Colors.red,
+                                      ),
+                                      child: const Text('終了する'),
+                                    ),
+                                  ],
+                                );
+                              },
+                            );
+                            
+                            // キャンセルされた場合は何もしない
+                            if (shouldComplete != true) {
+                              return;
+                            }
+                          }
+                          
+                          // 試合を完了状態にする
+                          if (_match != null && _match!.completedAt == null) {
+                            final updatedMatch = Match(
+                              id: _match!.id,
+                              tournamentName: _match!.tournamentName,
+                              team1Player1: _match!.team1Player1,
+                              team1Player2: _match!.team1Player2,
+                              team1Club: _match!.team1Club,
+                              team2Player1: _match!.team2Player1,
+                              team2Player2: _match!.team2Player2,
+                              team2Club: _match!.team2Club,
+                              gameCount: _match!.gameCount,
+                              firstServe: _match!.firstServe,
+                              createdAt: _match!.createdAt,
+                              completedAt: DateTime.now(),
+                            );
+                            await DatabaseHelper.instance.updateMatch(updatedMatch);
+                          }
+                          
+                          // メインメニューに戻る
+                          if (mounted) {
+                            Navigator.of(context).pushAndRemoveUntil(
+                              MaterialPageRoute(
+                                builder: (context) => const MainMenuScreen(),
+                              ),
+                              (route) => false, // 全ての前のルートを削除
+                            );
+                          }
                         },
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -643,7 +801,7 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
 
   Widget _buildTableHeader(String text, {bool isGames = false}) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
       child: Text(
         text,
         textAlign: TextAlign.center,
@@ -659,7 +817,7 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
 
   Widget _buildPlayerCell(String players, String club) {
     return Container(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -667,17 +825,24 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
           Text(
             players,
             style: const TextStyle(
-              fontSize: 10,
+              fontSize: 9,
               fontWeight: FontWeight.w500,
               color: Color(0xFF333333),
             ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
           if (club.isNotEmpty)
-            Text(
-              club,
-              style: const TextStyle(
-                fontSize: 8,
-                color: Color(0xFF7F7F7F),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                club,
+                style: const TextStyle(
+                  fontSize: 7,
+                  color: Color(0xFF7F7F7F),
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
         ],
@@ -752,11 +917,12 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     final hasService = firstServeTeam == team;
     
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      alignment: Alignment.center,
       child: hasService
           ? Container(
-              width: 20,
-              height: 20,
+              width: 18,
+              height: 18,
               decoration: BoxDecoration(
                 border: Border.all(color: const Color(0xFF333333), width: 1.5),
                 shape: BoxShape.circle,
@@ -765,7 +931,7 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
                 child: Text(
                   '○',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 11,
                     color: Color(0xFF333333),
                     fontWeight: FontWeight.bold,
                   ),
@@ -801,10 +967,11 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     // デュースの場合でも、勝利チームのみ丸を表示する
     if (isGameCompleted && isWinner && point >= 4) {
       return Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        alignment: Alignment.center,
         child: Container(
-          width: 20,
-          height: 20,
+          width: 18,
+          height: 18,
           decoration: BoxDecoration(
             border: Border.all(
               color: Colors.green,
@@ -816,7 +983,7 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
             child: Text(
               '$point',
               style: const TextStyle(
-                fontSize: 10,
+                fontSize: 9,
                 fontWeight: FontWeight.bold,
                 color: Colors.green,
               ),
@@ -829,12 +996,13 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     // ゲームが完了したが、このチームが負けた場合（4ポイント以上でも丸なしで表示）
     if (isGameCompleted && !isWinner && point >= 4) {
       return Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        alignment: Alignment.center,
         child: Text(
           '$point',
           textAlign: TextAlign.center,
           style: const TextStyle(
-            fontSize: 14,
+            fontSize: 12,
             fontWeight: FontWeight.normal,
             color: Color(0xFF333333),
           ),
@@ -844,12 +1012,13 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     
     // 進行中のゲームのスコア表示
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      alignment: Alignment.center,
       child: Text(
         '$point',
         textAlign: TextAlign.center,
         style: TextStyle(
-          fontSize: 14,
+          fontSize: 12,
           fontWeight: isWinner ? FontWeight.bold : FontWeight.normal,
           color: isWinner ? Colors.green : const Color(0xFF333333),
         ),
@@ -859,15 +1028,16 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
 
   Widget _buildGamesCell(int games) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: const BoxDecoration(
         color: Color(0xFFF2F2F2),
       ),
+      alignment: Alignment.center,
       child: Text(
         '$games',
         textAlign: TextAlign.center,
         style: const TextStyle(
-          fontSize: 16,
+          fontSize: 14,
           fontWeight: FontWeight.bold,
         ),
       ),
