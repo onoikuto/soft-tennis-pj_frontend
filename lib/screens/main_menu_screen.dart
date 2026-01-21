@@ -3,6 +3,7 @@ import 'package:soft_tennis_scoring/screens/match_history_screen.dart';
 import 'package:soft_tennis_scoring/screens/match_setup_screen.dart';
 import 'package:soft_tennis_scoring/screens/statistics_screen.dart';
 import 'package:soft_tennis_scoring/screens/my_page_screen.dart';
+import 'package:soft_tennis_scoring/screens/master_management_screen.dart';
 import 'package:soft_tennis_scoring/widgets/common/bottom_navigation_bar.dart';
 import 'package:soft_tennis_scoring/widgets/common/simple_button.dart';
 
@@ -101,6 +102,19 @@ class _HomeContent extends StatelessWidget {
                     onTap: () {
                       // ボトムナビゲーションバーの「統計」タブ（index 2）に切り替え
                       onNavigateToIndex(2);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  SimpleSecondaryButton(
+                    title: '選手・所属チーム管理',
+                    subtitle: 'Player & Club Management',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const MasterManagementScreen(),
+                        ),
+                      );
                     },
                   ),
                   // 下部に余白を追加（ボトムナビゲーションバーの高さ分）

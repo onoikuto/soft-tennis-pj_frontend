@@ -5,6 +5,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'package:soft_tennis_scoring/database/database_helper.dart';
 import 'package:soft_tennis_scoring/screens/main_menu_screen.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +32,11 @@ void main() async {
     debugPrint('データベース初期化エラー: $e');
     debugPrint('注意: Web版ではSQLiteの使用に制限があります。');
     debugPrint('デスクトップ版またはモバイル版での使用を推奨します。');
+  }
+  
+  // Google Mobile Adsの初期化（モバイル版のみ、macOSは除外）
+  if (!kIsWeb && defaultTargetPlatform != TargetPlatform.macOS) {
+    MobileAds.instance.initialize();
   }
   
   runApp(const MyApp());

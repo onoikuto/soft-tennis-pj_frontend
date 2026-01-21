@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:soft_tennis_scoring/database/database_helper.dart';
 import 'package:soft_tennis_scoring/models/match.dart';
 import 'package:soft_tennis_scoring/models/game_score.dart';
+import 'package:soft_tennis_scoring/services/subscription_service.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:intl/intl.dart';
 
 class StatisticsScreen extends StatefulWidget {
@@ -20,6 +23,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   List<String> _filteredItems = [];
   final _searchController = TextEditingController();
   bool _isLoading = true;
+  bool _isSubscribed = false;
 
   // 統計データ
   int _totalMatches = 0;
@@ -30,12 +34,24 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   int _deuceLosses = 0;
   double _serviceWinRate = 0.0;
   double _receiveWinRate = 0.0;
+  // 追加統計
+  double _finalGameWinRate = 0.0;
+  int _finalGameWins = 0;
+  int _finalGameTotal = 0;
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_filterItems);
+    _checkSubscriptionStatus();
     _loadStatistics();
+  }
+  
+  Future<void> _checkSubscriptionStatus() async {
+    final isSubscribed = await SubscriptionService.isSubscribed();
+    setState(() {
+      _isSubscribed = isSubscribed;
+    });
   }
 
   @override
@@ -74,8 +90,9 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   Future<void> _loadStatistics() async {
     setState(() => _isLoading = true);
     
-    final matches = await DatabaseHelper.instance.getAllMatches();
-    List<Match> completedMatches = matches.where((m) => m.completedAt != null).toList();
+    try {
+      final matches = await DatabaseHelper.instance.getAllMatches();
+      List<Match> completedMatches = matches.where((m) => m.completedAt != null).toList();
     
     // ペア、組織、個人のリストを生成
     final pairsSet = <String>{};
@@ -105,21 +122,25 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
         orgsSet.add(match.team2Club);
       }
       
-      // 人単位
-      if (match.team1Club.isNotEmpty) {
-        playersSet.add('${match.team1Player1} (${match.team1Club})');
-        playersSet.add('${match.team1Player2} (${match.team1Club})');
-      } else {
-        playersSet.add(match.team1Player1);
-        playersSet.add(match.team1Player2);
-      }
-      if (match.team2Club.isNotEmpty) {
-        playersSet.add('${match.team2Player1} (${match.team2Club})');
-        playersSet.add('${match.team2Player2} (${match.team2Club})');
-      } else {
-        playersSet.add(match.team2Player1);
-        playersSet.add(match.team2Player2);
-      }
+      // 人単位（選手名 + 所属の組み合わせで一意性を保つ）
+      // 所属がある場合は「選手名 (所属)」、ない場合は「選手名 (所属なし)」として区別
+      final team1Player1Key = match.team1Club.isNotEmpty
+          ? '${match.team1Player1} (${match.team1Club})'
+          : '${match.team1Player1} (所属なし)';
+      final team1Player2Key = match.team1Club.isNotEmpty
+          ? '${match.team1Player2} (${match.team1Club})'
+          : '${match.team1Player2} (所属なし)';
+      final team2Player1Key = match.team2Club.isNotEmpty
+          ? '${match.team2Player1} (${match.team2Club})'
+          : '${match.team2Player1} (所属なし)';
+      final team2Player2Key = match.team2Club.isNotEmpty
+          ? '${match.team2Player2} (${match.team2Club})'
+          : '${match.team2Player2} (所属なし)';
+      
+      playersSet.add(team1Player1Key);
+      playersSet.add(team1Player2Key);
+      playersSet.add(team2Player1Key);
+      playersSet.add(team2Player2Key);
     }
     
     _pairs = pairsSet.toList()..sort();
@@ -134,9 +155,26 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       _selectedPair = _currentItems.first;
     }
     
-    await _calculateStatistics();
-    
-    setState(() => _isLoading = false);
+      await _calculateStatistics();
+      
+      setState(() => _isLoading = false);
+    } catch (e) {
+      debugPrint('統計データの読み込みエラー: $e');
+      setState(() {
+        _pairs = [];
+        _organizations = [];
+        _players = [];
+        _isLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('データの読み込みに失敗しました: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
 
@@ -151,6 +189,9 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
         _deuceLosses = 0;
         _serviceWinRate = 0.0;
         _receiveWinRate = 0.0;
+        _finalGameWinRate = 0.0;
+        _finalGameWins = 0;
+        _finalGameTotal = 0;
       });
       return;
     }
@@ -192,19 +233,86 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
         isTeam1 = true;
       }
     } else {
-      // 人単位
-      final playerName = _selectedPair!.split(' (').first;
+      // 人単位（選手名 + 所属の組み合わせで判定）
+      final selectedPlayerInfo = _selectedPair!;
+      String playerName;
+      String? playerClub;
+      
+      if (selectedPlayerInfo.contains(' (')) {
+        // 「山崎 (A高校)」または「山崎 (所属なし)」形式
+        final parts = selectedPlayerInfo.split(' (');
+        playerName = parts[0];
+        final clubPart = parts[1].replaceAll(')', '');
+        playerClub = clubPart == '所属なし' ? null : clubPart;
+      } else {
+        // フォールバック（旧形式対応）
+        playerName = selectedPlayerInfo;
+        playerClub = null;
+      }
+      
       relevantMatches = completedMatches.where((m) {
-        return m.team1Player1 == playerName ||
-               m.team1Player2 == playerName ||
-               m.team2Player1 == playerName ||
-               m.team2Player2 == playerName;
+        // チーム1の選手1と一致するか
+        bool match1 = m.team1Player1 == playerName;
+        if (match1) {
+          if (playerClub != null) {
+            match1 = m.team1Club == playerClub;
+          } else {
+            match1 = m.team1Club.isEmpty;
+          }
+        }
+        
+        // チーム1の選手2と一致するか
+        bool match2 = m.team1Player2 == playerName;
+        if (match2) {
+          if (playerClub != null) {
+            match2 = m.team1Club == playerClub;
+          } else {
+            match2 = m.team1Club.isEmpty;
+          }
+        }
+        
+        // チーム2の選手1と一致するか
+        bool match3 = m.team2Player1 == playerName;
+        if (match3) {
+          if (playerClub != null) {
+            match3 = m.team2Club == playerClub;
+          } else {
+            match3 = m.team2Club.isEmpty;
+          }
+        }
+        
+        // チーム2の選手2と一致するか
+        bool match4 = m.team2Player2 == playerName;
+        if (match4) {
+          if (playerClub != null) {
+            match4 = m.team2Club == playerClub;
+          } else {
+            match4 = m.team2Club.isEmpty;
+          }
+        }
+        
+        return match1 || match2 || match3 || match4;
       }).toList();
       
       if (relevantMatches.isNotEmpty) {
         final firstMatch = relevantMatches.first;
-        isTeam1 = firstMatch.team1Player1 == playerName ||
-                  firstMatch.team1Player2 == playerName;
+        // チーム1にいるか判定
+        bool inTeam1 = false;
+        if (firstMatch.team1Player1 == playerName) {
+          if (playerClub != null) {
+            inTeam1 = firstMatch.team1Club == playerClub;
+          } else {
+            inTeam1 = firstMatch.team1Club.isEmpty;
+          }
+        }
+        if (!inTeam1 && firstMatch.team1Player2 == playerName) {
+          if (playerClub != null) {
+            inTeam1 = firstMatch.team1Club == playerClub;
+          } else {
+            inTeam1 = firstMatch.team1Club.isEmpty;
+          }
+        }
+        isTeam1 = inTeam1;
       } else {
         isTeam1 = true;
       }
@@ -221,6 +329,9 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     int serviceTotal = 0;
     int receiveWins = 0;
     int receiveTotal = 0;
+    // 追加統計
+    int finalGameWins = 0;
+    int finalGameTotal = 0;
 
     for (var match in relevantMatches) {
       bool isThisTeam1;
@@ -232,10 +343,40 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
         // 学校・クラブ単位
         isThisTeam1 = match.team1Club == _selectedPair;
       } else {
-        // 人単位
-        final playerName = _selectedPair!.split(' (').first;
-        // その試合でそのプレイヤーがどちらのチームにいるかを判定
-        isThisTeam1 = match.team1Player1 == playerName || match.team1Player2 == playerName;
+        // 人単位（選手名 + 所属の組み合わせで判定）
+        final selectedPlayerInfo = _selectedPair!;
+        String playerName;
+        String? playerClub;
+        
+        if (selectedPlayerInfo.contains(' (')) {
+          final parts = selectedPlayerInfo.split(' (');
+          playerName = parts[0];
+          final clubPart = parts[1].replaceAll(')', '');
+          playerClub = clubPart == '所属なし' ? null : clubPart;
+        } else {
+          // フォールバック（旧形式対応）
+          playerName = selectedPlayerInfo;
+          playerClub = null;
+        }
+        
+        // チーム1にいるか判定
+        bool inTeam1 = false;
+        if (match.team1Player1 == playerName) {
+          if (playerClub != null) {
+            inTeam1 = match.team1Club == playerClub;
+          } else {
+            inTeam1 = match.team1Club.isEmpty;
+          }
+        }
+        if (!inTeam1 && match.team1Player2 == playerName) {
+          if (playerClub != null) {
+            inTeam1 = match.team1Club == playerClub;
+          } else {
+            inTeam1 = match.team1Club.isEmpty;
+          }
+        }
+        
+        isThisTeam1 = inTeam1;
       }
       
       // 試合の勝敗
@@ -248,6 +389,9 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
 
       // ゲームスコアを取得
       final gameScores = await DatabaseHelper.instance.getGameScoresByMatchId(match.id!);
+      final completedGameScores = gameScores.where((g) => g.winner != null).toList();
+      // 勝利に必要なゲーム数を計算（5ゲームマッチ→3、7ゲームマッチ→4、9ゲームマッチ→5）
+      final gamesToWin = (match.gameCount + 1) ~/ 2;
       
       for (var gameScore in gameScores) {
         if (gameScore.winner == null) continue;
@@ -270,6 +414,34 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           deuceTotal++;
           if (isWin) {
             deuceWins++;
+          }
+        }
+
+        // ファイナルゲーム判定
+        // 前のゲームまでで同点かつゲーム数に達している場合、現在のゲームがファイナルゲーム
+        int gamesBeforeThis = 0;
+        int team1GamesBefore = 0;
+        int team2GamesBefore = 0;
+        for (var gs in completedGameScores) {
+          if (gs.gameNumber < gameNum) {
+            gamesBeforeThis++;
+            if (gs.winner == 'team1') {
+              team1GamesBefore++;
+            } else if (gs.winner == 'team2') {
+              team2GamesBefore++;
+            }
+          }
+        }
+        
+        // ファイナルゲームの条件: 前のゲームまでで同点（各チームが勝利必要数-1勝）
+        // 例: 7ゲームマッチ(勝利必要4)では3-3の時（6ゲーム完了後）がファイナルゲーム
+        final isFinalGame = (team1GamesBefore == gamesToWin - 1) &&
+                           (team2GamesBefore == gamesToWin - 1);
+        
+        if (isFinalGame) {
+          finalGameTotal++;
+          if (isWin) {
+            finalGameWins++;
           }
         }
 
@@ -308,6 +480,10 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       _deuceLosses = deuceTotal - deuceWins;
       _serviceWinRate = serviceTotal == 0 ? 0.0 : serviceWins / serviceTotal * 100;
       _receiveWinRate = receiveTotal == 0 ? 0.0 : receiveWins / receiveTotal * 100;
+      // 追加統計
+      _finalGameWinRate = finalGameTotal == 0 ? 0.0 : finalGameWins / finalGameTotal * 100;
+      _finalGameWins = finalGameWins;
+      _finalGameTotal = finalGameTotal;
     });
   }
 
@@ -372,29 +548,43 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // セグメントコントロール
-                              _buildSegmentedControl(),
+                              // サブスクリプション未購入の場合、アップグレード促しを表示
+                              if (!_isSubscribed) _buildUpgradePrompt(),
+                              // セグメントコントロール（サブスクリプション未購入の場合はペア単位のみ）
+                              if (_isSubscribed) _buildSegmentedControl(),
+                              if (!_isSubscribed) _buildLimitedSegmentedControl(),
                               const SizedBox(height: 16),
                               // ペア/組織選択（リスト形式）
-                              _buildSelectionList(),
+                              if (_isSubscribed || _selectedView == 0) _buildSelectionList(),
                               const SizedBox(height: 16),
                               // 選択中の表示
                               if (_selectedPair != null) _buildSelectedInfo(),
                               const SizedBox(height: 16),
-                              // 通算試合数と勝率
+                              // 通算試合数と勝率（常に表示）
                               _buildTotalStatsCard(),
-                              const SizedBox(height: 16),
-                              // ゲーム別の得点率
-                              _buildGameWinRatesCard(),
-                              const SizedBox(height: 16),
-                              // デュース時取得率
-                              _buildDeuceWinRateCard(),
-                              const SizedBox(height: 16),
-                              // サーブ・レシーブ別取得率
-                              _buildServiceReceiveCard(),
-                              const SizedBox(height: 16),
-                              // データインサイト
-                              _buildDataInsightsCard(),
+                              // 広告表示（サブスクリプション未購入の場合）
+                              if (!_isSubscribed) ...[
+                                const SizedBox(height: 16),
+                                _buildAdBanner(),
+                              ],
+                              // サブスクリプション未購入の場合、他の統計は表示しない
+                              if (_isSubscribed) ...[
+                                const SizedBox(height: 16),
+                                // ゲーム別の得点率
+                                _buildGameWinRatesCard(),
+                                const SizedBox(height: 16),
+                                // デュース時取得率
+                                _buildDeuceWinRateCard(),
+                                const SizedBox(height: 16),
+                                // ファイナルゲームの勝率
+                                _buildFinalGameWinRateCard(),
+                                const SizedBox(height: 16),
+                                // サーブ・レシーブ別取得率
+                                _buildServiceReceiveCard(),
+                                const SizedBox(height: 16),
+                                // データインサイト
+                                _buildDataInsightsCard(),
+                              ],
                               const SizedBox(height: 32),
                             ],
                           ),
@@ -403,6 +593,131 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                     },
                   ),
                 ),
+    );
+  }
+
+  Widget _buildLimitedSegmentedControl() {
+    // サブスクリプション未購入の場合、ペア単位のみ表示
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2F2F2),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _selectedView = 0;
+                  _selectedPair = _pairs.isNotEmpty ? _pairs.first : null;
+                });
+                _calculateStatistics();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    const Text(
+                      'ペア単位',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    const Text(
+                      'By Pair',
+                      style: TextStyle(
+                        fontSize: 8,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Opacity(
+              opacity: 0.5,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  children: [
+                    const Text(
+                      '学校・クラブ単位',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.normal,
+                        color: Color(0xFF888888),
+                      ),
+                    ),
+                    const Text(
+                      'By Organization',
+                      style: TextStyle(
+                        fontSize: 8,
+                        color: Color(0xFF888888),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Icon(
+                      Icons.lock,
+                      size: 12,
+                      color: Color(0xFF888888),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Opacity(
+              opacity: 0.5,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  children: [
+                    const Text(
+                      '人単位',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.normal,
+                        color: Color(0xFF888888),
+                      ),
+                    ),
+                    const Text(
+                      'By Player',
+                      style: TextStyle(
+                        fontSize: 8,
+                        color: Color(0xFF888888),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Icon(
+                      Icons.lock,
+                      size: 12,
+                      color: Color(0xFF888888),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -464,11 +779,15 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           Expanded(
             child: GestureDetector(
               onTap: () {
-                setState(() {
-                  _selectedView = 1;
-                  _selectedPair = _organizations.isNotEmpty ? _organizations.first : null;
-                });
-                _calculateStatistics();
+                if (_isSubscribed) {
+                  setState(() {
+                    _selectedView = 1;
+                    _selectedPair = _organizations.isNotEmpty ? _organizations.first : null;
+                  });
+                  _calculateStatistics();
+                } else {
+                  _showSubscriptionDialog();
+                }
               },
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -510,11 +829,15 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           Expanded(
             child: GestureDetector(
               onTap: () {
-                setState(() {
-                  _selectedView = 2;
-                  _selectedPair = _players.isNotEmpty ? _players.first : null;
-                });
-                _calculateStatistics();
+                if (_isSubscribed) {
+                  setState(() {
+                    _selectedView = 2;
+                    _selectedPair = _players.isNotEmpty ? _players.first : null;
+                  });
+                  _calculateStatistics();
+                } else {
+                  _showSubscriptionDialog();
+                }
               },
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1240,6 +1563,167 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     );
   }
 
+  Widget _buildFinalGameWinRateCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFEEEEEE)),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Flexible(
+                  child: Text(
+                    'ファイナルゲームの勝率',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF333333),
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Flexible(
+                  child: Text(
+                    'FINAL GAME WIN RATE',
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: Color(0xFF888888),
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.5,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              children: [
+                if (_finalGameTotal == 0)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Text(
+                      'ファイナルゲームのデータがありません',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[500],
+                      ),
+                    ),
+                  )
+                else ...[
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        '${_finalGameWinRate.toStringAsFixed(1)}%',
+                        style: const TextStyle(
+                          fontSize: 36,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF333333),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Column(
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF1E293B),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                '勝利',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: Color(0xFF333333),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '$_finalGameWins',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w300,
+                              color: Color(0xFF333333),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 24),
+                      Column(
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFFEEEEEE),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                '敗北',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: Color(0xFF333333),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${_finalGameTotal - _finalGameWins}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w300,
+                              color: Color(0xFF333333),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildServiceReceiveCard() {
     return Container(
       decoration: BoxDecoration(
@@ -1534,6 +2018,151 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildUpgradePrompt() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'プレミアムにアップグレード',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  '詳細な統計データと広告非表示',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          ElevatedButton(
+            onPressed: () {
+              _showSubscriptionDialog();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: const Color(0xFF1E293B),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
+            child: const Text(
+              '購入',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showSubscriptionDialog() async {
+    final service = SubscriptionService();
+    
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('プレミアムにアップグレード'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('プレミアムの特典：'),
+            const SizedBox(height: 8),
+            const Text('• 広告非表示'),
+            const Text('• 詳細な統計データ（ゲーム別、デュース、ファイナルゲームなど）'),
+            const Text('• 学校・クラブ単位の統計'),
+            const Text('• 人単位の統計'),
+            if (defaultTargetPlatform == TargetPlatform.macOS || kIsWeb) ...[
+              const SizedBox(height: 16),
+              const Text(
+                '※ macOS/Web版ではテスト用に手動で有効化できます',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey,
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              final success = await service.purchaseSubscription();
+              if (success && mounted) {
+                await _checkSubscriptionStatus();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('プレミアムにアップグレードしました'),
+                  ),
+                );
+              } else if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('購入に失敗しました'),
+                  ),
+                );
+              }
+            },
+            child: const Text('購入'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdBanner() {
+    // 広告バナーを表示（実際の広告ユニットIDに置き換える）
+    // macOS/Webでは広告を表示しない
+    if (kIsWeb || defaultTargetPlatform == TargetPlatform.macOS) {
+      return const SizedBox.shrink();
+    }
+    
+    return Container(
+      alignment: Alignment.center,
+      width: double.infinity,
+      height: 50,
+      child: AdWidget(
+        ad: BannerAd(
+          adUnitId: 'ca-app-pub-3940256099942544/6300978111', // テスト広告ID（実際のIDに置き換える）
+          size: AdSize.banner,
+          request: const AdRequest(),
+          listener: BannerAdListener(
+            onAdLoaded: (_) {},
+            onAdFailedToLoad: (ad, error) {
+              ad.dispose();
+            },
+          ),
+        )..load(),
       ),
     );
   }

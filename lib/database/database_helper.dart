@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint;
 import '../models/match.dart';
 import '../models/set_score.dart';
 import '../models/game_score.dart';
@@ -54,7 +55,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2, // データベースバージョン（スキーマ変更時に増加）
+      version: 3, // データベースバージョン（スキーマ変更時に増加）
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -74,6 +75,8 @@ class DatabaseHelper {
     await _createMatchesTable(db);
     await _createSetScoresTable(db);
     await _createGameScoresTable(db);
+    await _createPlayersTable(db);
+    await _createClubsTable(db);
     await _createIndexes(db);
   }
 
@@ -159,6 +162,42 @@ class DatabaseHelper {
     ''');
   }
 
+  /// playersテーブルを作成
+  /// 
+  /// 選手マスター情報を保存するテーブル
+  /// - id: 主キー（自動増分）
+  /// - name: 選手名
+  /// - club: 所属（学校・クラブ名）
+  /// - display_name: 表示名（識別子付き、例：「山田（太）」）
+  /// - created_at: 作成日時
+  Future<void> _createPlayersTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        club TEXT,
+        display_name TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  /// clubsテーブルを作成
+  /// 
+  /// 所属チームマスター情報を保存するテーブル
+  /// - id: 主キー（自動増分）
+  /// - name: 所属名
+  /// - created_at: 作成日時
+  Future<void> _createClubsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE clubs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+      )
+    ''');
+  }
+
   /// インデックスを作成
   /// 
   /// クエリパフォーマンスを向上させるためのインデックス
@@ -167,6 +206,10 @@ class DatabaseHelper {
     await db.execute('CREATE INDEX idx_match_id ON set_scores(match_id)');
     // ゲームスコアのマッチID検索を高速化
     await db.execute('CREATE INDEX idx_game_match_id ON game_scores(match_id)');
+    // 選手の名前検索を高速化
+    await db.execute('CREATE INDEX idx_player_name ON players(name)');
+    // 選手の所属検索を高速化
+    await db.execute('CREATE INDEX idx_player_club ON players(club)');
   }
 
   // ============================================================================
@@ -183,12 +226,12 @@ class DatabaseHelper {
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       // バージョン1から2へのマイグレーション
-      // 新しいカラムを追加
-      await db.execute('ALTER TABLE matches ADD COLUMN tournament_name TEXT');
-      await db.execute('ALTER TABLE matches ADD COLUMN team1_club TEXT');
-      await db.execute('ALTER TABLE matches ADD COLUMN team2_club TEXT');
-      await db.execute('ALTER TABLE matches ADD COLUMN game_count INTEGER DEFAULT 7');
-      await db.execute('ALTER TABLE matches ADD COLUMN first_serve TEXT');
+      // 新しいカラムを追加（既に存在する場合はエラーを無視）
+      await _addColumnIfNotExists(db, 'matches', 'tournament_name', 'TEXT');
+      await _addColumnIfNotExists(db, 'matches', 'team1_club', 'TEXT');
+      await _addColumnIfNotExists(db, 'matches', 'team2_club', 'TEXT');
+      await _addColumnIfNotExists(db, 'matches', 'game_count', 'INTEGER DEFAULT 7');
+      await _addColumnIfNotExists(db, 'matches', 'first_serve', 'TEXT');
       
       // ゲームスコアテーブルの作成（新機能）
       await db.execute('''
@@ -205,7 +248,56 @@ class DatabaseHelper {
       ''');
       await db.execute('CREATE INDEX IF NOT EXISTS idx_game_match_id ON game_scores(match_id)');
     }
+    if (oldVersion < 3) {
+      // バージョン2から3へのマイグレーション
+      // 選手マスターテーブルの作成
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS players (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          club TEXT,
+          display_name TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_player_name ON players(name)');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_player_club ON players(club)');
+      
+      // 所属チームマスターテーブルの作成
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS clubs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL
+        )
+      ''');
+    }
     // 将来のバージョンアップグレード処理をここに追加
+  }
+
+  /// カラムが存在しない場合のみ追加する
+  Future<void> _addColumnIfNotExists(
+    Database db,
+    String tableName,
+    String columnName,
+    String columnDefinition,
+  ) async {
+    try {
+      // テーブルのスキーマを取得してカラムの存在を確認
+      final result = await db.rawQuery(
+        "PRAGMA table_info($tableName)",
+      );
+      final columnExists = result.any((row) => row['name'] == columnName);
+      
+      if (!columnExists) {
+        await db.execute(
+          'ALTER TABLE $tableName ADD COLUMN $columnName $columnDefinition',
+        );
+      }
+    } catch (e) {
+      // エラーが発生した場合も続行（カラムが既に存在する可能性）
+      debugPrint('カラム追加エラー（無視）: $tableName.$columnName - $e');
+    }
   }
 
   // ============================================================================
@@ -390,6 +482,229 @@ class DatabaseHelper {
   // ============================================================================
   // ユーティリティ
   // ============================================================================
+
+  /// 過去の選手名のリストを取得
+  /// 
+  /// データベースに保存されているすべての選手名を重複なしで取得します。
+  Future<List<String>> getAllPlayerNames() async {
+    final db = await database;
+    final matches = await db.query('matches');
+    final playerNames = <String>{};
+    
+    for (var match in matches) {
+      if (match['team1_player1'] != null) {
+        playerNames.add(match['team1_player1'] as String);
+      }
+      if (match['team1_player2'] != null) {
+        playerNames.add(match['team1_player2'] as String);
+      }
+      if (match['team2_player1'] != null) {
+        playerNames.add(match['team2_player1'] as String);
+      }
+      if (match['team2_player2'] != null) {
+        playerNames.add(match['team2_player2'] as String);
+      }
+    }
+    
+    return playerNames.toList()..sort();
+  }
+
+  /// 過去の所属名のリストを取得
+  /// 
+  /// データベースに保存されているすべての所属名を重複なしで取得します。
+  /// まずclubsテーブルから取得し、なければmatchesテーブルから取得します。
+  Future<List<String>> getAllClubs() async {
+    final db = await database;
+    final clubs = <String>{};
+    
+    // clubsテーブルから取得
+    try {
+      final clubRecords = await db.query('clubs', orderBy: 'name ASC');
+      for (var record in clubRecords) {
+        clubs.add(record['name'] as String);
+      }
+    } catch (e) {
+      // テーブルが存在しない場合は無視
+    }
+    
+    // matchesテーブルからも取得（後方互換性のため）
+    final matches = await db.query('matches');
+    for (var match in matches) {
+      if (match['team1_club'] != null && (match['team1_club'] as String).isNotEmpty) {
+        clubs.add(match['team1_club'] as String);
+      }
+      if (match['team2_club'] != null && (match['team2_club'] as String).isNotEmpty) {
+        clubs.add(match['team2_club'] as String);
+      }
+    }
+    
+    return clubs.toList()..sort();
+  }
+
+  // ============================================================================
+  // 選手マスター関連のCRUD操作
+  // ============================================================================
+
+  /// 名前と所属の組み合わせで重複チェック
+  /// 
+  /// 同じ名前・同じ所属の選手が既に存在するかチェックします。
+  /// [excludeId]が指定されている場合、そのIDの選手はチェックから除外します（編集時用）。
+  Future<bool> checkPlayerDuplicate({
+    required String name,
+    String? club,
+    int? excludeId,
+  }) async {
+    final db = await database;
+    final clubValue = club?.trim() ?? '';
+    final List<Map<String, dynamic>> result;
+    
+    if (excludeId != null) {
+      result = await db.query(
+        'players',
+        where: 'name = ? AND club = ? AND id != ?',
+        whereArgs: [name.trim(), clubValue, excludeId],
+      );
+    } else {
+      result = await db.query(
+        'players',
+        where: 'name = ? AND club = ?',
+        whereArgs: [name.trim(), clubValue],
+      );
+    }
+    
+    return result.isNotEmpty;
+  }
+
+  /// 新しい選手を追加
+  Future<int> insertPlayer({
+    required String name,
+    String? club,
+  }) async {
+    final db = await database;
+    final clubValue = club?.trim() ?? '';
+    return await db.insert('players', {
+      'name': name.trim(),
+      'club': clubValue,
+      'display_name': name.trim(), // 後方互換性のため残すが、nameと同じ値を設定
+      'created_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// すべての選手を取得
+  Future<List<Map<String, dynamic>>> getAllPlayers() async {
+    final db = await database;
+    return await db.query('players', orderBy: 'name ASC, club ASC');
+  }
+
+  /// IDで選手を取得
+  Future<Map<String, dynamic>?> getPlayer(int id) async {
+    final db = await database;
+    final result = await db.query(
+      'players',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    return result.isNotEmpty ? result.first : null;
+  }
+
+  /// 選手を更新
+  Future<int> updatePlayer({
+    required int id,
+    required String name,
+    String? club,
+  }) async {
+    final db = await database;
+    final clubValue = club?.trim() ?? '';
+    return await db.update(
+      'players',
+      {
+        'name': name.trim(),
+        'club': clubValue,
+        'display_name': name.trim(), // 後方互換性のため残すが、nameと同じ値を設定
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// 選手を削除
+  Future<int> deletePlayer(int id) async {
+    final db = await database;
+    return await db.delete(
+      'players',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // ============================================================================
+  // 所属チームマスター関連のCRUD操作
+  // ============================================================================
+
+  /// 新しい所属チームを追加
+  Future<int> insertClub({required String name}) async {
+    final db = await database;
+    try {
+      return await db.insert('clubs', {
+        'name': name,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      // UNIQUE制約違反の場合は既に存在する
+      return -1;
+    }
+  }
+
+  /// すべての所属チームを取得
+  Future<List<Map<String, dynamic>>> getAllClubsMaster() async {
+    final db = await database;
+    try {
+      return await db.query('clubs', orderBy: 'name ASC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// IDで所属チームを取得
+  Future<Map<String, dynamic>?> getClub(int id) async {
+    final db = await database;
+    try {
+      final result = await db.query(
+        'clubs',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      return result.isNotEmpty ? result.first : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 所属チームを更新
+  Future<int> updateClub({required int id, required String name}) async {
+    final db = await database;
+    try {
+      return await db.update(
+        'clubs',
+        {'name': name},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    } catch (e) {
+      // UNIQUE制約違反の場合は既に存在する
+      return -1;
+    }
+  }
+
+  /// 所属チームを削除
+  Future<int> deleteClub(int id) async {
+    final db = await database;
+    return await db.delete(
+      'clubs',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
 
   /// データベース接続を閉じる
   /// 

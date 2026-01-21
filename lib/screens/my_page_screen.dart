@@ -1,48 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:soft_tennis_scoring/screens/backup_screen.dart';
-import 'package:soft_tennis_scoring/screens/account_settings_screen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:soft_tennis_scoring/screens/subscription_screen.dart';
+import 'package:soft_tennis_scoring/screens/privacy_policy_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-class MyPageScreen extends StatefulWidget {
+class MyPageScreen extends StatelessWidget {
   const MyPageScreen({super.key});
-
-  @override
-  State<MyPageScreen> createState() => _MyPageScreenState();
-}
-
-class _MyPageScreenState extends State<MyPageScreen> {
-  String _lastName = '';
-  String _firstName = '';
-  String _team = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _loadAccountSettings();
-  }
-
-  Future<void> _loadAccountSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _lastName = prefs.getString('account_last_name') ?? '';
-      _firstName = prefs.getString('account_first_name') ?? '';
-      _team = prefs.getString('account_team') ?? '';
-    });
-  }
-
-  String get _displayName {
-    if (_lastName.isEmpty && _firstName.isEmpty) {
-      return '佐藤 健太'; // デフォルト値
-    }
-    if (_firstName.isEmpty) {
-      return _lastName;
-    }
-    return '$_lastName $_firstName';
-  }
-
-  String get _displayTeam {
-    return _team.isEmpty ? '早稲田ソフトテニスクラブ' : _team; // デフォルト値
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -63,59 +26,12 @@ class _MyPageScreenState extends State<MyPageScreen> {
       ),
       body: ListView(
         children: [
-          // プロフィールセクション
-          Container(
-            color: Colors.white,
-            padding: const EdgeInsets.all(24),
-            margin: const EdgeInsets.only(bottom: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _displayName,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _displayTeam,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // アカウント設定
-          _buildSection(
-            [
-              _buildMenuItem(
-                Icons.manage_accounts,
-                'アカウント設定',
-                () async {
-                  final result = await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const AccountSettingsScreen(),
-                    ),
-                  );
-                  // 設定が保存された場合、プロフィール情報を再読み込み
-                  if (result == true) {
-                    _loadAccountSettings();
-                  }
-                },
-              ),
-            ],
-          ),
           const SizedBox(height: 24),
-          // データのバックアップと移行
+          // サブスクリプション
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(
-              'データのバックアップと移行',
+              'プラン',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
@@ -127,20 +43,38 @@ class _MyPageScreenState extends State<MyPageScreen> {
           _buildSection(
             [
               _buildMenuItem(
-                Icons.upload,
-                'データのエクスポート (書き出し)',
+                Icons.workspace_premium,
+                'サブスクリプション',
                 () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const BackupScreen(),
+                      builder: (context) => const SubscriptionScreen(),
                     ),
                   );
                 },
               ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          // データ管理
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(
+              'データ管理',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey[600],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _buildSection(
+            [
               _buildMenuItem(
-                Icons.download,
-                'データのインポート (読み込み)',
+                Icons.sync,
+                'データのバックアップと移行',
                 () {
                   Navigator.push(
                     context,
@@ -151,19 +85,48 @@ class _MyPageScreenState extends State<MyPageScreen> {
                 },
               ),
             ],
-            footer: Container(
-              padding: const EdgeInsets.all(16),
-              color: Colors.grey[50],
-              child: const Text(
-                'CSVや専用形式で試合データを保存・復元できます',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey,
-                ),
+          ),
+          const SizedBox(height: 24),
+          // サポート
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(
+              'サポート',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey[600],
               ),
             ),
           ),
-          const SizedBox(height: 48),
+          const SizedBox(height: 8),
+          _buildSection(
+            [
+              _buildMenuItem(
+                Icons.help_outline,
+                'お問い合わせ',
+                () async {
+                  final url = Uri.parse('https://forms.gle/X7ReoaPkyE65UeBU7');
+                  if (await canLaunchUrl(url)) {
+                    await launchUrl(url, mode: LaunchMode.externalApplication);
+                  }
+                },
+              ),
+              _buildMenuItem(
+                Icons.privacy_tip_outlined,
+                'プライバシーポリシー',
+                () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const PrivacyPolicyScreen(),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
           // バージョン情報
           const Center(
             child: Text(

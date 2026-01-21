@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// マッチ（試合）モデル
 /// 
 /// ソフトテニスの試合情報を表すデータモデルです。
@@ -97,23 +99,30 @@ class Match {
   /// [map] データベースクエリ結果のMap
   /// 戻り値: Matchオブジェクト
   factory Match.fromMap(Map<String, dynamic> map) {
-    return Match(
-      id: map['id'] as int?,
-      tournamentName: map['tournament_name'] as String? ?? '',
-      team1Player1: map['team1_player1'] as String,
-      team1Player2: map['team1_player2'] as String,
-      team1Club: map['team1_club'] as String? ?? '',
-      team2Player1: map['team2_player1'] as String,
-      team2Player2: map['team2_player2'] as String,
-      team2Club: map['team2_club'] as String? ?? '',
-      gameCount: map['game_count'] as int? ?? 7,
-      firstServe: map['first_serve'] as String?,
-      createdAt: DateTime.parse(map['created_at'] as String),
-      completedAt: map['completed_at'] != null
-          ? DateTime.parse(map['completed_at'] as String)
-          : null,
-      winner: map['winner'] as String?,
-    );
+    try {
+      return Match(
+        id: map['id'] as int?,
+        tournamentName: map['tournament_name'] as String? ?? '',
+        team1Player1: map['team1_player1'] as String? ?? '',
+        team1Player2: map['team1_player2'] as String? ?? '',
+        team1Club: map['team1_club'] as String? ?? '',
+        team2Player1: map['team2_player1'] as String? ?? '',
+        team2Player2: map['team2_player2'] as String? ?? '',
+        team2Club: map['team2_club'] as String? ?? '',
+        gameCount: map['game_count'] as int? ?? 7,
+        firstServe: map['first_serve'] as String?,
+        createdAt: DateTime.parse(map['created_at'] as String),
+        completedAt: map['completed_at'] != null
+            ? DateTime.parse(map['completed_at'] as String)
+            : null,
+        winner: map['winner'] as String?,
+      );
+    } catch (e) {
+      // エラーログを出力
+      debugPrint('Match.fromMap エラー: $e');
+      debugPrint('Map内容: $map');
+      rethrow;
+    }
   }
 
   /// チーム1の表示名を取得
