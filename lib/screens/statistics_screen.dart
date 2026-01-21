@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:soft_tennis_scoring/database/database_helper.dart';
 import 'package:soft_tennis_scoring/models/match.dart';
 import 'package:soft_tennis_scoring/models/game_score.dart';
+import 'package:soft_tennis_scoring/models/point_detail.dart';
 import 'package:soft_tennis_scoring/services/subscription_service.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:intl/intl.dart';
@@ -15,7 +16,7 @@ class StatisticsScreen extends StatefulWidget {
 }
 
 class _StatisticsScreenState extends State<StatisticsScreen> {
-  int _selectedView = 0; // 0: ペア単位, 1: 学校・クラブ単位, 2: 人単位
+  int _selectedView = 0; // 0: ペア単位, 1: 学校・クラブ単位, 2: 選手単位
   String? _selectedPair;
   List<String> _pairs = [];
   List<String> _organizations = [];
@@ -38,6 +39,13 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   double _finalGameWinRate = 0.0;
   int _finalGameWins = 0;
   int _finalGameTotal = 0;
+
+  // 詳細統計（ポイント詳細データからの統計）
+  double _firstServeInRate = 0.0;  // 1stサーブ成功率
+  double _firstServePointRate = 0.0;  // 1stサーブ時得点率
+  int _winnerCount = 0;  // ウィナー数（エース含む）
+  int _myErrorCount = 0;  // 自分のミス数
+  bool _hasPointDetails = false;  // ポイント詳細データがあるか
 
   @override
   void initState() {
@@ -471,6 +479,9 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       }
     }
 
+    // 詳細統計の計算（ポイント詳細データから）
+    await _calculateDetailedStatistics(relevantMatches);
+
     setState(() {
       _totalMatches = relevantMatches.length;
       _winRate = relevantMatches.isEmpty ? 0.0 : wins / relevantMatches.length * 100;
@@ -485,6 +496,117 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       _finalGameWins = finalGameWins;
       _finalGameTotal = finalGameTotal;
     });
+  }
+
+  /// 詳細統計の計算（ポイント詳細データから）
+  Future<void> _calculateDetailedStatistics(List<Match> relevantMatches) async {
+    int firstServeInCount = 0;
+    int firstServeTotalCount = 0;
+    int firstServePointWinCount = 0;
+    int firstServePointTotalCount = 0;
+    int winnerCount = 0;
+    int myErrorCount = 0;
+    bool hasData = false;
+
+    for (var match in relevantMatches) {
+      if (match.id == null) continue;
+
+      // このマッチのポイント詳細データを取得
+      final pointDetails = await DatabaseHelper.instance.getPointDetailsByMatchId(match.id!);
+      if (pointDetails.isEmpty) continue;
+
+      hasData = true;
+
+      // 選択されたペア/組織/個人のチームを判定
+      bool isThisTeam1;
+      String? targetPlayerName; // 選手単位の場合、対象の選手名
+      
+      if (_selectedView == 0) {
+        final pairName = _selectedPair!.split(' (').first;
+        isThisTeam1 = '${match.team1Player1}・${match.team1Player2}' == pairName;
+      } else if (_selectedView == 1) {
+        isThisTeam1 = match.team1Club == _selectedPair;
+      } else {
+        // 選手単位
+        final selectedPlayerInfo = _selectedPair!;
+        String playerName;
+        String? playerClub;
+        if (selectedPlayerInfo.contains(' (')) {
+          final parts = selectedPlayerInfo.split(' (');
+          playerName = parts[0];
+          final clubPart = parts[1].replaceAll(')', '');
+          playerClub = clubPart == '所属なし' ? null : clubPart;
+        } else {
+          playerName = selectedPlayerInfo;
+          playerClub = null;
+        }
+        
+        targetPlayerName = playerName; // 選手名を記録
+        
+        bool inTeam1 = false;
+        if (match.team1Player1 == playerName) {
+          if (playerClub != null) {
+            inTeam1 = match.team1Club == playerClub;
+          } else {
+            inTeam1 = match.team1Club.isEmpty;
+          }
+        }
+        if (!inTeam1 && match.team1Player2 == playerName) {
+          if (playerClub != null) {
+            inTeam1 = match.team1Club == playerClub;
+          } else {
+            inTeam1 = match.team1Club.isEmpty;
+          }
+        }
+        isThisTeam1 = inTeam1;
+      }
+
+      final myTeam = isThisTeam1 ? 'team1' : 'team2';
+      final opponentTeam = isThisTeam1 ? 'team2' : 'team1';
+
+      for (var point in pointDetails) {
+        final isMyServe = point.serverTeam == myTeam;
+
+        // 1stサーブ統計（自分がサーブの時）- ペア/クラブ単位のみ
+        if (_selectedView != 2 && isMyServe) {
+          firstServeTotalCount++;
+          if (point.firstServeIn) {
+            firstServeInCount++;
+            firstServePointTotalCount++;
+            if (point.pointWinner == myTeam) {
+              firstServePointWinCount++;
+            }
+          }
+        }
+
+        // ウィナー/エラー統計
+        if (_selectedView == 2 && targetPlayerName != null) {
+          // 選手単位: action_playerで個人をフィルタリング
+          // ウィナー: その選手が決めた
+          if (point.pointType == PointType.winner && point.actionPlayer == targetPlayerName) {
+            winnerCount++;
+          }
+          // エラー: その選手がミスした
+          if (point.pointType == PointType.opponentError && point.actionPlayer == targetPlayerName) {
+            myErrorCount++;
+          }
+        } else {
+          // ペア/クラブ単位: チーム全体でカウント
+          if (point.pointWinner == myTeam && point.pointType == PointType.winner) {
+            winnerCount++;
+          }
+          if (point.pointWinner == opponentTeam && point.pointType == PointType.opponentError) {
+            myErrorCount++;
+          }
+        }
+      }
+    }
+
+    _hasPointDetails = hasData;
+    _firstServeInRate = firstServeTotalCount == 0 ? 0.0 : firstServeInCount / firstServeTotalCount * 100;
+    _firstServePointRate = firstServePointTotalCount == 0 ? 0.0 : firstServePointWinCount / firstServePointTotalCount * 100;
+    _winnerCount = winnerCount;
+    _myErrorCount = myErrorCount;
   }
 
   @override
@@ -581,6 +703,9 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                                 const SizedBox(height: 16),
                                 // サーブ・レシーブ別取得率
                                 _buildServiceReceiveCard(),
+                                const SizedBox(height: 16),
+                                // 詳細統計（1stサーブ成功率・得点率、レシーブミス率、ウィナー/エラー）
+                                _buildDetailedStatisticsCard(),
                                 const SizedBox(height: 16),
                                 // データインサイト
                                 _buildDataInsightsCard(),
@@ -691,7 +816,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                 child: Column(
                   children: [
                     const Text(
-                      '人単位',
+                      '選手単位',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.normal,
@@ -857,7 +982,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                 child: Column(
                   children: [
                     Text(
-                      '人単位',
+                      '選手単位',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: _selectedView == 2 ? FontWeight.w600 : FontWeight.normal,
@@ -1910,6 +2035,408 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     );
   }
 
+  /// 詳細統計カード（サブスク対象）
+  /// 1stサーブ成功率・得点率、レシーブミス率、ウィナー/アンフォーストエラー
+  Widget _buildDetailedStatisticsCard() {
+    if (!_hasPointDetails) {
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: const Color(0xFFEEEEEE)),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: Color(0xFFEEEEEE))),
+                color: Color(0xFFF7F7F7),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.analytics,
+                    size: 16,
+                    color: Color(0xFF1E293B),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    '詳細統計',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF333333),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'DETAILED STATISTICS',
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: Color(0xFF888888),
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 40,
+                    color: Colors.grey[400],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '詳細データがありません',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'マッチスコア画面で「分析+」モードをONにして\n記録した試合の統計が表示されます',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[500],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFEEEEEE)),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: Color(0xFFEEEEEE))),
+              color: Color(0xFFF7F7F7),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.analytics,
+                  size: 16,
+                  color: Color(0xFF1E293B),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  '詳細統計',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF333333),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: () => _showWinnerErrorInfo(context),
+                  child: const Icon(
+                    Icons.info_outline,
+                    size: 15,
+                    color: Color(0xFF999999),
+                  ),
+                ),
+                const Spacer(),
+                const Text(
+                  'DETAILED STATISTICS',
+                  style: TextStyle(
+                    fontSize: 9,
+                    color: Color(0xFF888888),
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                // 1stサーブ成功率
+                _buildDetailStatRow(
+                  '1stサーブ成功率',
+                  '${_firstServeInRate.toStringAsFixed(1)}%',
+                  Icons.sports_tennis,
+                  const Color(0xFF4CAF50),
+                ),
+                const SizedBox(height: 16),
+                // 1stサーブ得点率
+                _buildDetailStatRow(
+                  '1stサーブ得点率',
+                  '${_firstServePointRate.toStringAsFixed(1)}%',
+                  Icons.check_circle_outline,
+                  const Color(0xFF2196F3),
+                ),
+                const Divider(height: 32),
+                // ウィナー - エラー
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text(
+                      'ウィナー',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF666666),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      '$_winnerCount',
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF4CAF50),
+                      ),
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        '-',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w300,
+                          color: Color(0xFF999999),
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '$_myErrorCount',
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFFF5722),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Text(
+                      'エラー',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF666666),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showWinnerErrorInfo(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF5F5F5),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.info_outline,
+                      size: 20,
+                      color: Color(0xFF1E293B),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'ウィナー / エラーとは',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF333333),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF4CAF50).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '🏆',
+                      style: TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'ウィナー',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF4CAF50),
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            '自分が攻めて決めたポイント',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF666666),
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF5722).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '❌',
+                      style: TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'エラー',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFFF5722),
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            '自分のミスで失ったポイント\n（アンフォーストエラー）',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF666666),
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: TextButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E293B),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: const Text(
+                    '閉じる',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailStatRow(String label, String value, IconData icon, Color iconColor) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: iconColor),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontSize: 13,
+              color: Color(0xFF333333),
+            ),
+          ),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF333333),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildDataInsightsCard() {
     // 最も低いゲーム勝率を探す
     int? lowestGame;
@@ -2096,7 +2623,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
             const Text('• 広告非表示'),
             const Text('• 詳細な統計データ（ゲーム別、デュース、ファイナルゲームなど）'),
             const Text('• 学校・クラブ単位の統計'),
-            const Text('• 人単位の統計'),
+            const Text('• 選手単位の統計'),
             if (defaultTargetPlatform == TargetPlatform.macOS || kIsWeb) ...[
               const SizedBox(height: 16),
               const Text(

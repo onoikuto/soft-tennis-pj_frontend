@@ -169,12 +169,35 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                             '煩わしい広告を完全に非表示にします',
                             _isSubscribed,
                           ),
-                          _buildFeatureItem(
-                            Icons.analytics,
-                            '詳細統計',
-                            'ファイナルゲーム勝率など高度な統計データを表示',
+                          const SizedBox(height: 8),
+                          // 分析+機能
+                          _buildFeatureItemWithDetails(
+                            Icons.insights,
+                            '分析+',
+                            '試合中にポイント詳細を記録できます',
+                            [
+                              '1stサーブ成功/フォルトの記録',
+                              'ウィナー/エラーの記録（選手別）',
+                              '記録データから詳細統計を自動計算',
+                            ],
                             _isSubscribed,
                           ),
+                          const SizedBox(height: 8),
+                          // 詳細統計
+                          _buildFeatureItemWithDetails(
+                            Icons.analytics,
+                            '詳細統計',
+                            '高度な統計データで試合を分析',
+                            [
+                              '1stサーブ成功率・得点率',
+                              'ウィナー / エラー（選手別）',
+                              'ファイナルゲーム勝率',
+                              'デュース勝率',
+                              'ゲーム別得点状況',
+                            ],
+                            _isSubscribed,
+                          ),
+                          const SizedBox(height: 8),
                           _buildFeatureItem(
                             Icons.groups,
                             'クラブ別統計',
@@ -397,6 +420,118 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeatureItemWithDetails(
+    IconData icon,
+    String title,
+    String description,
+    List<String> details,
+    bool isEnabled,
+  ) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isEnabled ? const Color(0xFFF0FDF4) : const Color(0xFFFAFAFA),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isEnabled ? const Color(0xFF86EFAC) : const Color(0xFFE5E5E5),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isEnabled
+                      ? const Color(0xFFDCFCE7)
+                      : const Color(0xFFF5F5F5),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  icon,
+                  size: 20,
+                  color: isEnabled
+                      ? const Color(0xFF22C55E)
+                      : const Color(0xFF888888),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF333333),
+                          ),
+                        ),
+                        if (isEnabled) ...[
+                          const SizedBox(width: 6),
+                          const Icon(
+                            Icons.check_circle,
+                            size: 14,
+                            color: Color(0xFF4CAF50),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      description,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...details.map((detail) => Padding(
+            padding: const EdgeInsets.only(left: 8, bottom: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.check,
+                  size: 14,
+                  color: isEnabled 
+                      ? const Color(0xFF22C55E)
+                      : Colors.grey[400],
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    detail,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isEnabled
+                          ? const Color(0xFF374151)
+                          : Colors.grey[500],
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )),
         ],
       ),
     );

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import '../models/match.dart';
 import '../models/set_score.dart';
 import '../models/game_score.dart';
+import '../models/point_detail.dart';
 
 /// データベースヘルパークラス
 /// 
@@ -55,7 +56,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3, // データベースバージョン（スキーマ変更時に増加）
+      version: 5, // データベースバージョン（スキーマ変更時に増加）
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -77,6 +78,7 @@ class DatabaseHelper {
     await _createGameScoresTable(db);
     await _createPlayersTable(db);
     await _createClubsTable(db);
+    await _createPointDetailsTable(db);
     await _createIndexes(db);
   }
 
@@ -198,6 +200,37 @@ class DatabaseHelper {
     ''');
   }
 
+  /// point_detailsテーブルを作成
+  /// 
+  /// ポイントごとの詳細情報を保存するテーブル（詳細入力モード用）
+  /// - id: 主キー（自動増分）
+  /// - match_id: マッチID（外部キー）
+  /// - game_number: ゲーム番号
+  /// - point_number: ゲーム内のポイント番号
+  /// - server_team: サーブ側チーム（'team1' or 'team2'）
+  /// - first_serve_in: 1stサーブが入ったか（1=入った, 0=入らなかった）
+  /// - point_winner: ポイント獲得チーム（'team1' or 'team2'）
+  /// - point_type: ポイント種類（'ace', 'winner', 'opponent_error'）
+  /// - action_player: アクションを起こした選手名
+  /// - created_at: 作成日時
+  Future<void> _createPointDetailsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE point_details (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        match_id INTEGER NOT NULL,
+        game_number INTEGER NOT NULL,
+        point_number INTEGER NOT NULL,
+        server_team TEXT NOT NULL,
+        first_serve_in INTEGER NOT NULL,
+        point_winner TEXT NOT NULL,
+        point_type TEXT NOT NULL,
+        action_player TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (match_id) REFERENCES matches (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
   /// インデックスを作成
   /// 
   /// クエリパフォーマンスを向上させるためのインデックス
@@ -210,6 +243,8 @@ class DatabaseHelper {
     await db.execute('CREATE INDEX idx_player_name ON players(name)');
     // 選手の所属検索を高速化
     await db.execute('CREATE INDEX idx_player_club ON players(club)');
+    // ポイント詳細のマッチID検索を高速化
+    await db.execute('CREATE INDEX idx_point_details_match_id ON point_details(match_id)');
   }
 
   // ============================================================================
@@ -271,6 +306,30 @@ class DatabaseHelper {
           created_at TEXT NOT NULL
         )
       ''');
+    }
+    if (oldVersion < 4) {
+      // バージョン3から4へのマイグレーション
+      // ポイント詳細テーブルの作成（詳細入力モード用）
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS point_details (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          match_id INTEGER NOT NULL,
+          game_number INTEGER NOT NULL,
+          point_number INTEGER NOT NULL,
+          server_team TEXT NOT NULL,
+          first_serve_in INTEGER NOT NULL,
+          point_winner TEXT NOT NULL,
+          point_type TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (match_id) REFERENCES matches (id) ON DELETE CASCADE
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_point_details_match_id ON point_details(match_id)');
+    }
+    if (oldVersion < 5) {
+      // バージョン4から5へのマイグレーション
+      // action_playerカラムを追加
+      await _addColumnIfNotExists(db, 'point_details', 'action_player', 'TEXT');
     }
     // 将来のバージョンアップグレード処理をここに追加
   }
@@ -704,6 +763,92 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  // ============================================================================
+  // ポイント詳細 CRUD操作
+  // ============================================================================
+
+  /// ポイント詳細を挿入
+  Future<int> insertPointDetail(PointDetail pointDetail) async {
+    final db = await database;
+    return await db.insert('point_details', pointDetail.toMap());
+  }
+
+  /// 指定したマッチのポイント詳細を全て取得
+  Future<List<PointDetail>> getPointDetailsByMatchId(int matchId) async {
+    final db = await database;
+    final result = await db.query(
+      'point_details',
+      where: 'match_id = ?',
+      whereArgs: [matchId],
+      orderBy: 'game_number ASC, point_number ASC',
+    );
+    return result.map((map) => PointDetail.fromMap(map)).toList();
+  }
+
+  /// 指定したマッチ・ゲームのポイント詳細を取得
+  Future<List<PointDetail>> getPointDetailsByGameNumber(int matchId, int gameNumber) async {
+    final db = await database;
+    final result = await db.query(
+      'point_details',
+      where: 'match_id = ? AND game_number = ?',
+      whereArgs: [matchId, gameNumber],
+      orderBy: 'point_number ASC',
+    );
+    return result.map((map) => PointDetail.fromMap(map)).toList();
+  }
+
+  /// ポイント詳細を更新
+  Future<int> updatePointDetail(PointDetail pointDetail) async {
+    final db = await database;
+    return await db.update(
+      'point_details',
+      pointDetail.toMap(),
+      where: 'id = ?',
+      whereArgs: [pointDetail.id],
+    );
+  }
+
+  /// ポイント詳細を削除
+  Future<int> deletePointDetail(int id) async {
+    final db = await database;
+    return await db.delete(
+      'point_details',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// 指定したマッチの最後のポイント詳細を削除（Undo用）
+  Future<int> deleteLastPointDetail(int matchId) async {
+    final db = await database;
+    // 最後のポイント詳細を取得
+    final result = await db.query(
+      'point_details',
+      where: 'match_id = ?',
+      whereArgs: [matchId],
+      orderBy: 'game_number DESC, point_number DESC',
+      limit: 1,
+    );
+    if (result.isNotEmpty) {
+      return await db.delete(
+        'point_details',
+        where: 'id = ?',
+        whereArgs: [result.first['id']],
+      );
+    }
+    return 0;
+  }
+
+  /// 指定したマッチにポイント詳細が存在するか確認
+  Future<bool> hasPointDetails(int matchId) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM point_details WHERE match_id = ?',
+      [matchId],
+    );
+    return (result.first['count'] as int) > 0;
   }
 
   /// データベース接続を閉じる
