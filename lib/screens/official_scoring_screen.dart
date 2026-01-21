@@ -50,8 +50,15 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
   /// 詳細入力モード設定を読み込む
   Future<void> _loadDetailModeSetting() async {
     final prefs = await SharedPreferences.getInstance();
+    final isSubscribed = await SubscriptionService.isSubscribed();
     setState(() {
-      _detailMode = prefs.getBool('detail_mode') ?? false;
+      // サブスク加入者のみ詳細モードを有効化できる
+      if (isSubscribed) {
+        _detailMode = prefs.getBool('detail_mode') ?? false;
+      } else {
+        // フリープランの場合は必ずOFF
+        _detailMode = false;
+      }
     });
   }
 
