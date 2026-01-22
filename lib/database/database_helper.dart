@@ -56,7 +56,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 5, // データベースバージョン（スキーマ変更時に増加）
+      version: 6, // データベースバージョン（スキーマ変更時に増加）
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -208,6 +208,7 @@ class DatabaseHelper {
   /// - game_number: ゲーム番号
   /// - point_number: ゲーム内のポイント番号
   /// - server_team: サーブ側チーム（'team1' or 'team2'）
+  /// - server_player: サーブを打った選手名
   /// - first_serve_in: 1stサーブが入ったか（1=入った, 0=入らなかった）
   /// - point_winner: ポイント獲得チーム（'team1' or 'team2'）
   /// - point_type: ポイント種類（'ace', 'winner', 'opponent_error'）
@@ -221,6 +222,7 @@ class DatabaseHelper {
         game_number INTEGER NOT NULL,
         point_number INTEGER NOT NULL,
         server_team TEXT NOT NULL,
+        server_player TEXT,
         first_serve_in INTEGER NOT NULL,
         point_winner TEXT NOT NULL,
         point_type TEXT NOT NULL,
@@ -317,6 +319,7 @@ class DatabaseHelper {
           game_number INTEGER NOT NULL,
           point_number INTEGER NOT NULL,
           server_team TEXT NOT NULL,
+          server_player TEXT,
           first_serve_in INTEGER NOT NULL,
           point_winner TEXT NOT NULL,
           point_type TEXT NOT NULL,
@@ -330,6 +333,11 @@ class DatabaseHelper {
       // バージョン4から5へのマイグレーション
       // action_playerカラムを追加
       await _addColumnIfNotExists(db, 'point_details', 'action_player', 'TEXT');
+    }
+    if (oldVersion < 6) {
+      // バージョン5から6へのマイグレーション
+      // server_playerカラムを追加
+      await _addColumnIfNotExists(db, 'point_details', 'server_player', 'TEXT');
     }
     // 将来のバージョンアップグレード処理をここに追加
   }

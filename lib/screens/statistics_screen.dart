@@ -567,8 +567,21 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       for (var point in pointDetails) {
         final isMyServe = point.serverTeam == myTeam;
 
-        // 1stサーブ統計（自分がサーブの時）- ペア/クラブ単位のみ
-        if (_selectedView != 2 && isMyServe) {
+        // 1stサーブ統計
+        if (_selectedView == 2 && targetPlayerName != null) {
+          // 選手単位: serverPlayerで個人をフィルタリング
+          if (point.serverPlayer == targetPlayerName) {
+            firstServeTotalCount++;
+            if (point.firstServeIn) {
+              firstServeInCount++;
+              firstServePointTotalCount++;
+              if (point.pointWinner == myTeam) {
+                firstServePointWinCount++;
+              }
+            }
+          }
+        } else if (_selectedView != 2 && isMyServe) {
+          // ペア/クラブ単位: チーム全体でカウント
           firstServeTotalCount++;
           if (point.firstServeIn) {
             firstServeInCount++;
@@ -1877,7 +1890,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
               children: [
                 Flexible(
                   child: Text(
-                    'サーブ・レシーブ別取得率',
+                    'サーブ・レシーブ別ゲーム取得率',
                     style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,

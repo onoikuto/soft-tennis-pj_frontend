@@ -21,6 +21,11 @@ class PointDetail {
   /// 'team2': チーム2がサーブ
   final String serverTeam;
 
+  /// サーブを打った選手名
+  /// 例: "山田", "佐藤"
+  /// null: 未設定（旧データなど）
+  final String? serverPlayer;
+
   /// 1stサーブが入ったかどうか
   /// true: 1stサーブが入った
   /// false: 1stサーブが入らなかった（2ndサーブへ）
@@ -49,6 +54,7 @@ class PointDetail {
     required this.gameNumber,
     required this.pointNumber,
     required this.serverTeam,
+    this.serverPlayer,
     required this.firstServeIn,
     required this.pointWinner,
     required this.pointType,
@@ -64,6 +70,7 @@ class PointDetail {
       'game_number': gameNumber,
       'point_number': pointNumber,
       'server_team': serverTeam,
+      'server_player': serverPlayer,
       'first_serve_in': firstServeIn ? 1 : 0,
       'point_winner': pointWinner,
       'point_type': pointType,
@@ -80,6 +87,7 @@ class PointDetail {
       gameNumber: map['game_number'] as int,
       pointNumber: map['point_number'] as int,
       serverTeam: map['server_team'] as String,
+      serverPlayer: map['server_player'] as String?,
       firstServeIn: (map['first_serve_in'] as int) == 1,
       pointWinner: map['point_winner'] as String,
       pointType: map['point_type'] as String,
@@ -118,6 +126,7 @@ class PointDetail {
     int? gameNumber,
     int? pointNumber,
     String? serverTeam,
+    String? serverPlayer,
     bool? firstServeIn,
     String? pointWinner,
     String? pointType,
@@ -130,6 +139,7 @@ class PointDetail {
       gameNumber: gameNumber ?? this.gameNumber,
       pointNumber: pointNumber ?? this.pointNumber,
       serverTeam: serverTeam ?? this.serverTeam,
+      serverPlayer: serverPlayer ?? this.serverPlayer,
       firstServeIn: firstServeIn ?? this.firstServeIn,
       pointWinner: pointWinner ?? this.pointWinner,
       pointType: pointType ?? this.pointType,

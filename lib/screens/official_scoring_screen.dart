@@ -189,17 +189,100 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     });
   }
 
-  Future<void> _addPoint(String team) async {
-    if (_match == null) return;
-
-    // 詳細入力モードがONの場合、詳細入力ダイアログを表示
-    if (_detailMode) {
-      final pointDetail = await _showPointDetailDialog(team);
-      if (pointDetail == null) {
-        // キャンセルされた場合は何もしない
-        return;
+  /// ゲーム開始時の最初のサーバー選手を決定
+  /// 
+  /// [gameNumber] ゲーム番号
+  /// [previousGameServiceTeam] 前のゲームのサーブ権チーム（nullの場合は1ゲーム目）
+  /// 
+  /// 戻り値: 最初のサーバー選手名
+  String _getFirstServerPlayerForGame(int gameNumber, String? previousGameServiceTeam) {
+    if (_match == null) return '';
+    
+    if (gameNumber == 1) {
+      // 1ゲーム目: マッチの先サーブ設定から決定
+      final firstServeTeam = _match!.firstServe ?? 'team1';
+      if (firstServeTeam == 'team1') {
+        return _match!.team1Player1; // チーム1の最初の選手
+      } else {
+        return _match!.team2Player1; // チーム2の最初の選手
+      }
+    } else {
+      // 2ゲーム目以降: 前のゲームのサーブ権と逆のチームから開始
+      if (previousGameServiceTeam == null) {
+        // 前のゲーム情報がない場合は、デフォルトでteam2から開始
+        return _match!.team2Player1;
+      }
+      
+      // 前のゲームのサーブ権と逆のチームから開始
+      if (previousGameServiceTeam == 'team1') {
+        return _match!.team2Player1; // チーム2の最初の選手
+      } else {
+        return _match!.team1Player1; // チーム1の最初の選手
       }
     }
+  }
+
+  /// 現在のポイントでのサーバー選手を計算
+  /// 
+  /// [firstServerPlayer] ゲーム開始時の最初のサーバー選手名
+  /// [totalPoints] 現在のゲームの合計ポイント数（追加前）
+  /// [isFinalGame] ファイナルゲームかどうか
+  /// 
+  /// 戻り値: 現在のサーバー選手名
+  String _getCurrentServerPlayer(String firstServerPlayer, int totalPoints, bool isFinalGame) {
+    if (_match == null) return '';
+    
+    // 最初のサーバーがどのチームに属するかを判定
+    final isFirstServerTeam1 = firstServerPlayer == _match!.team1Player1 || 
+                               firstServerPlayer == _match!.team1Player2;
+    
+    String player1, player2;
+    if (isFirstServerTeam1) {
+      player1 = _match!.team1Player1;
+      player2 = _match!.team1Player2;
+    } else {
+      player1 = _match!.team2Player1;
+      player2 = _match!.team2Player2;
+    }
+    
+    // 最初のサーバーがplayer1かplayer2かを判定
+    final isFirstServerPlayer1 = firstServerPlayer == player1;
+    
+    if (isFinalGame) {
+      // ファイナルゲーム: 2ポイントごとに交代
+      // 0-1: player1(A), 2-3: 相手player1(C), 4-5: player2(B), 6-7: 相手player2(D), 8-9: player1(A)...
+      // ポイント数を2で割った商で判定
+      final serveRotation = (totalPoints ~/ 2) % 4;
+      if (serveRotation == 0) {
+        // 0-1ポイント目: 最初のサーバー（A）
+        return isFirstServerPlayer1 ? player1 : player2;
+      } else if (serveRotation == 1) {
+        // 2-3ポイント目: 相手チームのplayer1（C）
+        final opponentPlayer1 = isFirstServerTeam1 ? _match!.team2Player1 : _match!.team1Player1;
+        return opponentPlayer1;
+      } else if (serveRotation == 2) {
+        // 4-5ポイント目: 同じペア内のもう一人（B）
+        return isFirstServerPlayer1 ? player2 : player1;
+      } else {
+        // 6-7ポイント目: 相手チームのplayer2（D）
+        final opponentPlayer2 = isFirstServerTeam1 ? _match!.team2Player2 : _match!.team1Player2;
+        return opponentPlayer2;
+      }
+    } else {
+      // 通常のゲーム: 2ポイントごとに交代（同じペア内で）
+      // ポイント数を2で割った商が偶数の場合、最初のサーバーと同じ選手
+      // 奇数の場合、最初のサーバーと逆の選手
+      final serveRotation = (totalPoints ~/ 2) % 2;
+      if (serveRotation == 0) {
+        return isFirstServerPlayer1 ? player1 : player2;
+      } else {
+        return isFirstServerPlayer1 ? player2 : player1;
+      }
+    }
+  }
+
+  Future<void> _addPoint(String team) async {
+    if (_match == null) return;
 
     // 現在のゲームのスコアを取得
     // 完了していないゲーム（winner == null）を探す
@@ -227,16 +310,105 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     int team1Score = currentGameScore?.team1Score ?? 0;
     int team2Score = currentGameScore?.team2Score ?? 0;
 
+    // ファイナルゲームかどうかを判定
+    final isFinalGame = _isFinalGame(_currentGame);
+    
+    // 現在のポイント数（追加前）を計算
+    final totalPointsBefore = team1Score + team2Score;
+    
+    // 現在のサーバー選手を計算（ポイント追加前）
+    String? currentServerPlayer;
+    if (currentGameScore == null) {
+      // 新しいゲームの場合、最初のサーバーを決定
+      String? previousGameServiceTeam;
+      if (_currentGame > 1 && _gameScores.isNotEmpty) {
+        // 完了したゲームの中で最後のものを探す
+        for (var score in _gameScores.reversed) {
+          if (score.winner != null) {
+            previousGameServiceTeam = score.serviceTeam;
+            break;
+          }
+        }
+      }
+      currentServerPlayer = _getFirstServerPlayerForGame(_currentGame, previousGameServiceTeam);
+    } else {
+      // 既存のゲームの場合、ゲーム開始時の最初のサーバーを取得
+      String? previousGameServiceTeam;
+      if (_currentGame > 1 && _gameScores.isNotEmpty) {
+        // 前の完了したゲームのサーブ権を取得
+        for (var score in _gameScores.reversed) {
+          if (score.gameNumber == _currentGame - 1 && score.winner != null) {
+            previousGameServiceTeam = score.serviceTeam;
+            break;
+          }
+        }
+      }
+      final firstServerPlayer = _getFirstServerPlayerForGame(_currentGame, previousGameServiceTeam);
+      currentServerPlayer = _getCurrentServerPlayer(firstServerPlayer, totalPointsBefore, isFinalGame);
+    }
+
+    // 詳細入力モードがONの場合、詳細入力ダイアログを表示
+    if (_detailMode) {
+      final pointDetail = await _showPointDetailDialog(team, currentServerPlayer ?? '');
+      if (pointDetail == null) {
+        // キャンセルされた場合は何もしない
+        return;
+      }
+    } else {
+      // 詳細入力モードがOFFでも、最低限のPointDetailを保存（一つ戻る用）
+      // サーブ側チームを決定
+      String serverTeam;
+      if (currentGameScore != null) {
+        serverTeam = currentGameScore.serviceTeam ?? 'team1';
+      } else {
+        // 新しいゲームの場合
+        if (_currentGame == 1) {
+          serverTeam = _match!.firstServe ?? 'team1';
+        } else if (_gameScores.isNotEmpty) {
+          GameScore? lastCompletedGame;
+          for (var score in _gameScores.reversed) {
+            if (score.winner != null) {
+              lastCompletedGame = score;
+              break;
+            }
+          }
+          serverTeam = lastCompletedGame?.serviceTeam == 'team1' ? 'team2' : 'team1';
+        } else {
+          serverTeam = 'team1';
+        }
+      }
+      
+      // 現在のゲームのポイント数を計算
+      final currentGamePoints = _pointDetails.where(
+        (p) => p.matchId == widget.matchId && p.gameNumber == _currentGame
+      ).length;
+      
+      // 最低限のPointDetailを作成して保存
+      final simplePointDetail = PointDetail(
+        matchId: widget.matchId,
+        gameNumber: _currentGame,
+        pointNumber: currentGamePoints + 1,
+        serverTeam: serverTeam,
+        serverPlayer: currentServerPlayer,
+        firstServeIn: true, // デフォルト値
+        pointWinner: team,
+        pointType: 'opponent_error', // デフォルト値
+        actionPlayer: null,
+        createdAt: DateTime.now(),
+      );
+      
+      await DatabaseHelper.instance.insertPointDetail(simplePointDetail);
+      setState(() {
+        _pointDetails.add(simplePointDetail);
+      });
+    }
+
+    // ポイントを加算
     if (team == 'team1') {
       team1Score++;
     } else {
       team2Score++;
     }
-
-    // ファイナルゲームかどうかを判定
-    // ファイナルゲームは、ゲーム数に達した時点で同点の場合に発生
-    // 現在のゲームがファイナルゲームかどうかを判定
-    final isFinalGame = _isFinalGame(_currentGame);
     
     // ゲームの勝敗判定
     String? winner;
@@ -475,15 +647,44 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
   Future<void> _undoLastPoint() async {
     if (_gameScores.isEmpty) return;
 
-    // 詳細入力モードの場合、最後のポイント詳細を削除
-    if (_detailMode && _pointDetails.isNotEmpty) {
+    final lastGame = _gameScores.last;
+    
+    // 最後のポイントを取ったチームを特定（ポイント詳細から取得）
+    String? lastPointWinner;
+    if (_pointDetails.isNotEmpty) {
+      // 現在のゲームの最後のポイント詳細を探す
+      PointDetail? lastPointDetail;
+      for (var point in _pointDetails.reversed) {
+        if (point.matchId == widget.matchId && point.gameNumber == lastGame.gameNumber) {
+          lastPointDetail = point;
+          break;
+        }
+      }
+      if (lastPointDetail != null) {
+        lastPointWinner = lastPointDetail.pointWinner;
+      }
+    }
+    
+    // 最後のポイントを取ったチームが不明な場合、スコアから推測
+    if (lastPointWinner == null) {
+      if (lastGame.team1Score > lastGame.team2Score) {
+        lastPointWinner = 'team1';
+      } else if (lastGame.team2Score > lastGame.team1Score) {
+        lastPointWinner = 'team2';
+      } else {
+        // 同点の場合は、デフォルトでteam1から減らす（本来は発生しないはず）
+        lastPointWinner = 'team1';
+      }
+    }
+
+    // 最後のポイント詳細を削除
+    if (_pointDetails.isNotEmpty) {
       await DatabaseHelper.instance.deleteLastPointDetail(widget.matchId);
       setState(() {
         _pointDetails.removeLast();
       });
     }
 
-    final lastGame = _gameScores.last;
     if (lastGame.team1Score == 0 && lastGame.team2Score == 0) {
       // ゲームが空の場合は削除
       await DatabaseHelper.instance.deleteGameScore(lastGame.id!);
@@ -491,16 +692,14 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
         _currentGame--;
       });
     } else {
-      // 最後のポイントを削除
+      // 最後のポイントを削除（最後にポイントを取ったチームから1ポイント減らす）
       int team1Score = lastGame.team1Score;
       int team2Score = lastGame.team2Score;
 
-      if (team1Score > team2Score) {
+      if (lastPointWinner == 'team1') {
         team1Score--;
-      } else if (team2Score > team1Score) {
+      } else if (lastPointWinner == 'team2') {
         team2Score--;
-      } else {
-        team1Score = team2Score = 0;
       }
 
       // 勝敗を再判定
@@ -523,13 +722,47 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
         }
       }
 
+      // サーブ権を計算（ファイナルゲームの場合は正しく戻す）
+      String? serviceTeam;
+      if (isFinalGame) {
+        // ファイナルゲーム: 戻した後のポイント数でサーブ権を計算
+        final totalPointsAfterUndo = team1Score + team2Score;
+        
+        // ゲーム開始時のサーブ権を取得
+        String initialServiceTeam;
+        if (lastGame.gameNumber == 1) {
+          initialServiceTeam = _match!.firstServe ?? 'team1';
+        } else {
+          // 前のゲームの最後のサーブ権と逆
+          GameScore? previousGame;
+          for (var score in _gameScores.reversed) {
+            if (score.gameNumber == lastGame.gameNumber - 1 && score.winner != null) {
+              previousGame = score;
+              break;
+            }
+          }
+          initialServiceTeam = previousGame?.serviceTeam == 'team1' ? 'team2' : 'team1';
+        }
+        
+        // 2ポイントごとにサーブ権が交代
+        final serveRotation = (totalPointsAfterUndo ~/ 2) % 2;
+        if (serveRotation == 0) {
+          serviceTeam = initialServiceTeam;
+        } else {
+          serviceTeam = initialServiceTeam == 'team1' ? 'team2' : 'team1';
+        }
+      } else {
+        // 通常のゲーム: サーブ権は維持
+        serviceTeam = lastGame.serviceTeam;
+      }
+
       final updatedGameScore = GameScore(
         id: lastGame.id,
         matchId: widget.matchId,
         gameNumber: lastGame.gameNumber,
         team1Score: team1Score,
         team2Score: team2Score,
-        serviceTeam: lastGame.serviceTeam,
+        serviceTeam: serviceTeam,
         winner: winner,
       );
       await DatabaseHelper.instance.updateGameScore(updatedGameScore);
@@ -565,8 +798,9 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
   /// 詳細入力ダイアログを表示
   /// 
   /// [pointWinner] ポイントを獲得するチーム（'team1' or 'team2'）
+  /// [serverPlayer] サーブを打った選手名
   /// 戻り値: ポイント詳細データ。キャンセルの場合はnull
-  Future<PointDetail?> _showPointDetailDialog(String pointWinner) async {
+  Future<PointDetail?> _showPointDetailDialog(String pointWinner, String serverPlayer) async {
     if (_match == null) return null;
 
     // 現在のゲーム情報を取得
@@ -610,6 +844,7 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
           gameNumber: currentGameNum,
           pointNumber: currentGamePoints + 1,
           serverTeam: serverTeam,
+          serverPlayer: serverPlayer,
           pointWinner: pointWinner,
           team1Player1: _match!.team1Player1,
           team1Player2: _match!.team1Player2,
@@ -1211,14 +1446,33 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
       final isFinalGame = _isFinalGame(_currentGame);
       if (isFinalGame) {
         // ファイナルゲーム: 2ポイントごとにサーブ権が交代
+        // 次のポイントのサーブ権を表示するため、totalPoints + 1で判定
         final totalPoints = currentGameScore.team1Score + currentGameScore.team2Score;
-        // 合計ポイント数が2の倍数の時にサーブ権が交代
-        if (totalPoints > 0 && totalPoints % 2 == 0) {
-          // サーブ権を交代
-          firstServeTeam = currentGameScore.serviceTeam == 'team1' ? 'team2' : 'team1';
+        final nextPoint = totalPoints + 1;
+        
+        // ゲーム開始時のサーブ権を取得
+        String initialServiceTeam;
+        if (_currentGame == 1) {
+          initialServiceTeam = match.firstServe ?? 'team1';
         } else {
-          // サーブ権を維持
-          firstServeTeam = currentGameScore.serviceTeam;
+          // 前のゲームのサーブ権と逆
+          GameScore? previousGame;
+          for (var gameNum = _currentGame - 1; gameNum >= 1; gameNum--) {
+            final game = scores[gameNum];
+            if (game != null && game.winner != null) {
+              previousGame = game;
+              break;
+            }
+          }
+          initialServiceTeam = previousGame?.serviceTeam == 'team1' ? 'team2' : 'team1';
+        }
+        
+        // 次のポイントが何ポイント目かで判定（2ポイントごとに交代）
+        final serveRotation = ((nextPoint - 1) ~/ 2) % 2;
+        if (serveRotation == 0) {
+          firstServeTeam = initialServiceTeam;
+        } else {
+          firstServeTeam = initialServiceTeam == 'team1' ? 'team2' : 'team1';
         }
       } else {
         // 通常のゲーム: そのゲームのサーブ権
@@ -1864,6 +2118,7 @@ class _PointDetailDialog extends StatefulWidget {
   final int gameNumber;
   final int pointNumber;
   final String serverTeam;
+  final String serverPlayer;
   final String pointWinner;
   final String team1Player1;
   final String team1Player2;
@@ -1875,6 +2130,7 @@ class _PointDetailDialog extends StatefulWidget {
     required this.gameNumber,
     required this.pointNumber,
     required this.serverTeam,
+    required this.serverPlayer,
     required this.pointWinner,
     required this.team1Player1,
     required this.team1Player2,
@@ -1916,6 +2172,7 @@ class _PointDetailDialogState extends State<_PointDetailDialog> {
       gameNumber: widget.gameNumber,
       pointNumber: widget.pointNumber,
       serverTeam: widget.serverTeam,
+      serverPlayer: widget.serverPlayer.isNotEmpty ? widget.serverPlayer : null,
       firstServeIn: _firstServeIn,
       pointWinner: widget.pointWinner,
       pointType: pointType,
@@ -2008,13 +2265,26 @@ class _PointDetailDialogState extends State<_PointDetailDialog> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        '1stサーブ',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF666666),
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            '1stサーブ',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF666666),
+                            ),
+                          ),
+                          if (widget.serverPlayer.isNotEmpty)
+                            Text(
+                              'サーバー: ${widget.serverPlayer}',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Color(0xFF999999),
+                              ),
+                            ),
+                        ],
                       ),
                       const SizedBox(height: 8),
                       Row(
