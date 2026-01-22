@@ -888,15 +888,58 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     );
 
     if (result != null && _match != null) {
+      // 名前変更があった場合、point_detailsも更新する
+      final oldTeam1Player1 = _match!.team1Player1;
+      final oldTeam1Player2 = _match!.team1Player2;
+      final oldTeam2Player1 = _match!.team2Player1;
+      final oldTeam2Player2 = _match!.team2Player2;
+      
+      final newTeam1Player1 = result['team1Player1'] as String;
+      final newTeam1Player2 = result['team1Player2'] as String;
+      final newTeam2Player1 = result['team2Player1'] as String;
+      final newTeam2Player2 = result['team2Player2'] as String;
+      
+      // 各選手の名前変更をチェックしてpoint_detailsを更新
+      if (_match!.id != null) {
+        if (oldTeam1Player1 != newTeam1Player1 && oldTeam1Player1.isNotEmpty) {
+          await DatabaseHelper.instance.updatePlayerNameInPointDetails(
+            _match!.id!,
+            oldTeam1Player1,
+            newTeam1Player1,
+          );
+        }
+        if (oldTeam1Player2 != newTeam1Player2 && oldTeam1Player2.isNotEmpty) {
+          await DatabaseHelper.instance.updatePlayerNameInPointDetails(
+            _match!.id!,
+            oldTeam1Player2,
+            newTeam1Player2,
+          );
+        }
+        if (oldTeam2Player1 != newTeam2Player1 && oldTeam2Player1.isNotEmpty) {
+          await DatabaseHelper.instance.updatePlayerNameInPointDetails(
+            _match!.id!,
+            oldTeam2Player1,
+            newTeam2Player1,
+          );
+        }
+        if (oldTeam2Player2 != newTeam2Player2 && oldTeam2Player2.isNotEmpty) {
+          await DatabaseHelper.instance.updatePlayerNameInPointDetails(
+            _match!.id!,
+            oldTeam2Player2,
+            newTeam2Player2,
+          );
+        }
+      }
+      
       // マッチ情報を更新
       final updatedMatch = Match(
         id: _match!.id,
         tournamentName: result['tournamentName'] as String,
-        team1Player1: result['team1Player1'] as String,
-        team1Player2: result['team1Player2'] as String,
+        team1Player1: newTeam1Player1,
+        team1Player2: newTeam1Player2,
         team1Club: result['team1Club'] as String,
-        team2Player1: result['team2Player1'] as String,
-        team2Player2: result['team2Player2'] as String,
+        team2Player1: newTeam2Player1,
+        team2Player2: newTeam2Player2,
         team2Club: result['team2Club'] as String,
         gameCount: _match!.gameCount,
         firstServe: result['firstServe'] as String?,
@@ -905,6 +948,38 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
         winner: _match!.winner,
       );
       await DatabaseHelper.instance.updateMatch(updatedMatch);
+      
+      // _pointDetailsのメモリ上のデータも更新
+      setState(() {
+        _pointDetails = _pointDetails.map((point) {
+          var updatedPoint = point;
+          
+          // serverPlayerの更新
+          if (updatedPoint.serverPlayer == oldTeam1Player1) {
+            updatedPoint = updatedPoint.copyWith(serverPlayer: newTeam1Player1);
+          } else if (updatedPoint.serverPlayer == oldTeam1Player2) {
+            updatedPoint = updatedPoint.copyWith(serverPlayer: newTeam1Player2);
+          } else if (updatedPoint.serverPlayer == oldTeam2Player1) {
+            updatedPoint = updatedPoint.copyWith(serverPlayer: newTeam2Player1);
+          } else if (updatedPoint.serverPlayer == oldTeam2Player2) {
+            updatedPoint = updatedPoint.copyWith(serverPlayer: newTeam2Player2);
+          }
+          
+          // actionPlayerの更新
+          if (updatedPoint.actionPlayer == oldTeam1Player1) {
+            updatedPoint = updatedPoint.copyWith(actionPlayer: newTeam1Player1);
+          } else if (updatedPoint.actionPlayer == oldTeam1Player2) {
+            updatedPoint = updatedPoint.copyWith(actionPlayer: newTeam1Player2);
+          } else if (updatedPoint.actionPlayer == oldTeam2Player1) {
+            updatedPoint = updatedPoint.copyWith(actionPlayer: newTeam2Player1);
+          } else if (updatedPoint.actionPlayer == oldTeam2Player2) {
+            updatedPoint = updatedPoint.copyWith(actionPlayer: newTeam2Player2);
+          }
+          
+          return updatedPoint;
+        }).toList();
+      });
+      
       await _loadMatchData();
 
       if (mounted) {

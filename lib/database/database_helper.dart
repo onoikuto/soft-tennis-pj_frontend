@@ -866,4 +866,26 @@ class DatabaseHelper {
     final db = await database;
     await db.close();
   }
+
+  /// point_detailsの選手名を一括更新
+  /// 
+  /// 試合設定で選手名を変更した際に、その試合のpoint_detailsも更新します。
+  /// [matchId] マッチID
+  /// [oldName] 変更前の選手名
+  /// [newName] 変更後の選手名
+  Future<void> updatePlayerNameInPointDetails(int matchId, String oldName, String newName) async {
+    final db = await database;
+    
+    // server_playerの更新
+    await db.rawUpdate(
+      'UPDATE point_details SET server_player = ? WHERE match_id = ? AND server_player = ?',
+      [newName, matchId, oldName],
+    );
+    
+    // action_playerの更新
+    await db.rawUpdate(
+      'UPDATE point_details SET action_player = ? WHERE match_id = ? AND action_player = ?',
+      [newName, matchId, oldName],
+    );
+  }
 }
