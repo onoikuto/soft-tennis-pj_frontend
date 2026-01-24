@@ -24,6 +24,7 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
   bool _isMatchCompleted = false;
   bool _detailMode = false; // 詳細入力モード
   bool _isSubscribed = false; // サブスク状態
+  bool _firstServeIn = true; // 1stサーブ選択（メイン画面用）
   List<PointDetail> _pointDetails = []; // 詳細ポイントデータ
 
   @override
@@ -281,6 +282,55 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     }
   }
 
+  /// 現在のサーバー選手名を取得（UI表示用）
+  String _getCurrentServerPlayerName() {
+    if (_match == null) return '---';
+    
+    // 試合が終了している場合
+    if (_isMatchCompleted) return '---';
+    
+    // 現在のゲームのスコアを取得
+    GameScore? currentGameScore;
+    for (var score in _gameScores.reversed) {
+      if (score.winner == null) {
+        currentGameScore = score;
+        break;
+      }
+    }
+    
+    // ゲームが開始されていない場合でも、次のゲームのサーバーを表示
+    if (currentGameScore == null) {
+      // 次のゲームの最初のサーバーを取得
+      String? previousGameServiceTeam;
+      if (_currentGame > 1 && _gameScores.isNotEmpty) {
+        for (var score in _gameScores.reversed) {
+          if (score.gameNumber == _currentGame - 1 && score.winner != null) {
+            previousGameServiceTeam = score.serviceTeam;
+            break;
+          }
+        }
+      }
+      return _getFirstServerPlayerForGame(_currentGame, previousGameServiceTeam);
+    }
+    
+    final isFinalGame = _isFinalGame(_currentGame);
+    final totalPoints = currentGameScore.team1Score + currentGameScore.team2Score;
+    
+    // ゲーム開始時の最初のサーバーを取得
+    String? previousGameServiceTeam;
+    if (_currentGame > 1 && _gameScores.isNotEmpty) {
+      for (var score in _gameScores.reversed) {
+        if (score.gameNumber == _currentGame - 1 && score.winner != null) {
+          previousGameServiceTeam = score.serviceTeam;
+          break;
+        }
+      }
+    }
+    final firstServerPlayer = _getFirstServerPlayerForGame(_currentGame, previousGameServiceTeam);
+    
+    return _getCurrentServerPlayer(firstServerPlayer, totalPoints, isFinalGame);
+  }
+
   Future<void> _addPoint(String team) async {
     if (_match == null) return;
 
@@ -349,7 +399,7 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
 
     // 詳細入力モードがONの場合、詳細入力ダイアログを表示
     if (_detailMode) {
-      final pointDetail = await _showPointDetailDialog(team, currentServerPlayer ?? '');
+      final pointDetail = await _showPointDetailDialog(team, currentServerPlayer ?? '', _firstServeIn);
       if (pointDetail == null) {
         // キャンセルされた場合は何もしない
         return;
@@ -390,7 +440,7 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
         pointNumber: currentGamePoints + 1,
         serverTeam: serverTeam,
         serverPlayer: currentServerPlayer,
-        firstServeIn: true, // デフォルト値
+        firstServeIn: _firstServeIn, // メイン画面で選択した値を使用
         pointWinner: team,
         pointType: 'opponent_error', // デフォルト値
         actionPlayer: null,
@@ -644,10 +694,29 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     return null;
   }
 
+  /// 一つ戻るボタンが有効かどうかを判定
+  bool _canUndo() {
+    if (_gameScores.isEmpty) return false;
+    
+    final lastGame = _gameScores.last;
+    
+    // 0-0の場合は戻せない
+    if (lastGame.team1Score == 0 && lastGame.team2Score == 0) {
+      return false;
+    }
+    
+    return true;
+  }
+
   Future<void> _undoLastPoint() async {
     if (_gameScores.isEmpty) return;
 
     final lastGame = _gameScores.last;
+    
+    // 0-0の場合は何もしない（試合の最初）
+    if (lastGame.team1Score == 0 && lastGame.team2Score == 0) {
+      return;
+    }
     
     // 最後のポイントを取ったチームを特定（ポイント詳細から取得）
     String? lastPointWinner;
@@ -799,8 +868,9 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
   /// 
   /// [pointWinner] ポイントを獲得するチーム（'team1' or 'team2'）
   /// [serverPlayer] サーブを打った選手名
+  /// [initialFirstServeIn] メイン画面で選択された1stサーブの状態
   /// 戻り値: ポイント詳細データ。キャンセルの場合はnull
-  Future<PointDetail?> _showPointDetailDialog(String pointWinner, String serverPlayer) async {
+  Future<PointDetail?> _showPointDetailDialog(String pointWinner, String serverPlayer, bool initialFirstServeIn) async {
     if (_match == null) return null;
 
     // 現在のゲーム情報を取得
@@ -850,6 +920,7 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
           team1Player2: _match!.team1Player2,
           team2Player1: _match!.team2Player1,
           team2Player2: _match!.team2Player2,
+          initialFirstServeIn: initialFirstServeIn, // メイン画面の選択を渡す
         );
       },
     );
@@ -1263,6 +1334,110 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
             ),
             child: Column(
               children: [
+                // 分析+モードがONの場合、1stサーブ選択を表示
+                if (_detailMode) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF5F5F5),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              '1stサーブ',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF666666),
+                              ),
+                            ),
+                            Text(
+                              'サーバー: ${_getCurrentServerPlayerName()}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF999999),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () => setState(() => _firstServeIn = true),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: _firstServeIn 
+                                        ? const Color(0xFF1E293B)
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: _firstServeIn 
+                                          ? const Color(0xFF1E293B)
+                                          : const Color(0xFFE5E5E5),
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      'IN',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: _firstServeIn 
+                                            ? Colors.white 
+                                            : const Color(0xFF888888),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () => setState(() => _firstServeIn = false),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: !_firstServeIn 
+                                        ? const Color(0xFF1E293B)
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: !_firstServeIn 
+                                          ? const Color(0xFF1E293B)
+                                          : const Color(0xFFE5E5E5),
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      'FAULT',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: !_firstServeIn 
+                                            ? Colors.white 
+                                            : const Color(0xFF888888),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 Row(
                   children: [
                     Expanded(
@@ -1289,7 +1464,7 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: _undoLastPoint,
+                        onPressed: _canUndo() ? _undoLastPoint : null,
                         icon: const Icon(Icons.undo),
                         label: const Text('一つ戻る'),
                         style: OutlinedButton.styleFrom(
@@ -2199,6 +2374,7 @@ class _PointDetailDialog extends StatefulWidget {
   final String team1Player2;
   final String team2Player1;
   final String team2Player2;
+  final bool initialFirstServeIn; // メイン画面で選択された1stサーブの状態
 
   const _PointDetailDialog({
     required this.matchId,
@@ -2211,6 +2387,7 @@ class _PointDetailDialog extends StatefulWidget {
     required this.team1Player2,
     required this.team2Player1,
     required this.team2Player2,
+    required this.initialFirstServeIn,
   });
 
   @override
@@ -2218,7 +2395,13 @@ class _PointDetailDialog extends StatefulWidget {
 }
 
 class _PointDetailDialogState extends State<_PointDetailDialog> {
-  bool _firstServeIn = true;
+  late bool _firstServeIn;
+
+  @override
+  void initState() {
+    super.initState();
+    _firstServeIn = widget.initialFirstServeIn; // メイン画面の選択値で初期化
+  }
 
   // 得点チームの選手リスト
   List<String> get _winnerPlayers {
@@ -2327,110 +2510,6 @@ class _PointDetailDialogState extends State<_PointDetailDialog> {
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 16),
-
-                // 1stサーブ
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFAFAFA),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            '1stサーブ',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF666666),
-                            ),
-                          ),
-                          if (widget.serverPlayer.isNotEmpty)
-                            Text(
-                              'サーバー: ${widget.serverPlayer}',
-                              style: const TextStyle(
-                                fontSize: 10,
-                                color: Color(0xFF999999),
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () => setState(() => _firstServeIn = true),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 10),
-                                decoration: BoxDecoration(
-                                  color: _firstServeIn 
-                                      ? const Color(0xFF1E293B)
-                                      : Colors.white,
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: _firstServeIn 
-                                        ? const Color(0xFF1E293B)
-                                        : const Color(0xFFE5E5E5),
-                                  ),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    'IN',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: _firstServeIn 
-                                          ? Colors.white 
-                                          : const Color(0xFF888888),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () => setState(() => _firstServeIn = false),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 10),
-                                decoration: BoxDecoration(
-                                  color: !_firstServeIn 
-                                      ? const Color(0xFF1E293B)
-                                      : Colors.white,
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: !_firstServeIn 
-                                        ? const Color(0xFF1E293B)
-                                        : const Color(0xFFE5E5E5),
-                                  ),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    'FAULT',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: !_firstServeIn 
-                                          ? Colors.white 
-                                          : const Color(0xFF888888),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
                 ),
                 const SizedBox(height: 16),
 
