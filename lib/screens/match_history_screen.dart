@@ -23,7 +23,12 @@ class _MatchHistoryScreenState extends State<MatchHistoryScreen> {
   void initState() {
     super.initState();
     _searchController.addListener(_filterMatches);
-    _loadMatches();
+    // フレームが描画された後にデータを読み込む（エラーを防ぐ）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _loadMatches();
+      }
+    });
   }
 
   @override

@@ -1,4 +1,4 @@
-package com.example.soft_tennis_scoring
+package com.onoikuto.valve
 
 import io.flutter.embedding.android.FlutterActivity
 

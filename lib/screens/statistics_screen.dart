@@ -51,8 +51,13 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   void initState() {
     super.initState();
     _searchController.addListener(_filterItems);
-    _checkSubscriptionStatus();
-    _loadStatistics();
+    // フレームが描画された後にデータを読み込む（エラーを防ぐ）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _checkSubscriptionStatus();
+        _loadStatistics();
+      }
+    });
   }
   
   Future<void> _checkSubscriptionStatus() async {
@@ -2687,23 +2692,35 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       return const SizedBox.shrink();
     }
     
-    return Container(
-      alignment: Alignment.center,
-      width: double.infinity,
-      height: 50,
-      child: AdWidget(
-        ad: BannerAd(
-          adUnitId: 'ca-app-pub-3940256099942544/6300978111', // テスト広告ID（実際のIDに置き換える）
-          size: AdSize.banner,
-          request: const AdRequest(),
-          listener: BannerAdListener(
-            onAdLoaded: (_) {},
-            onAdFailedToLoad: (ad, error) {
-              ad.dispose();
-            },
-          ),
-        )..load(),
-      ),
-    );
+    // サブスクリプション済みの場合は広告を表示しない
+    if (_isSubscribed) {
+      return const SizedBox.shrink();
+    }
+    
+    try {
+      final bannerAd = BannerAd(
+        adUnitId: 'ca-app-pub-3940256099942544/6300978111', // テスト広告ID（実際のIDに置き換える）
+        size: AdSize.banner,
+        request: const AdRequest(),
+        listener: BannerAdListener(
+          onAdLoaded: (_) {},
+          onAdFailedToLoad: (ad, error) {
+            debugPrint('広告の読み込みに失敗しました: $error');
+            ad.dispose();
+          },
+        ),
+      );
+      bannerAd.load();
+      
+      return Container(
+        alignment: Alignment.center,
+        width: double.infinity,
+        height: 50,
+        child: AdWidget(ad: bannerAd),
+      );
+    } catch (e) {
+      debugPrint('広告の作成に失敗しました: $e');
+      return const SizedBox.shrink();
+    }
   }
 }
