@@ -356,7 +356,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                     Center(
                       child: TextButton(
                         onPressed: () async {
-                          final url = Uri.parse('https://ononono.github.io/soft-tennis-pj_frontend/docs/terms_of_service.html');
+                          final url = Uri.parse('https://onoikuto.github.io/soft-tennis-pj_frontend/docs/terms_of_service.html');
                           if (await canLaunchUrl(url)) {
                             await launchUrl(url, mode: LaunchMode.externalApplication);
                           } else {
