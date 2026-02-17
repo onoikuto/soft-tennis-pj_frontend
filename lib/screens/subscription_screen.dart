@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SubscriptionScreen extends StatefulWidget {
   const SubscriptionScreen({super.key});
@@ -348,6 +349,45 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                             ),
                           ),
                         ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // 利用規約へのリンク
+                    Center(
+                      child: TextButton(
+                        onPressed: () async {
+                          final url = Uri.parse('https://ononono.github.io/soft-tennis-pj_frontend/docs/terms_of_service.html');
+                          if (await canLaunchUrl(url)) {
+                            await launchUrl(url, mode: LaunchMode.externalApplication);
+                          } else {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('利用規約ページを開けませんでした'),
+                                ),
+                              );
+                            }
+                          }
+                        },
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '利用規約',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.open_in_new,
+                              size: 14,
+                              color: Colors.grey[600],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
