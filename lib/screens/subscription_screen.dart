@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:soft_tennis_scoring/services/subscription_service.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:flutter/foundation.dart';
+import 'dart:async';
 
 class SubscriptionScreen extends StatefulWidget {
   const SubscriptionScreen({super.key});
@@ -12,37 +16,174 @@ class SubscriptionScreen extends StatefulWidget {
 class _SubscriptionScreenState extends State<SubscriptionScreen> {
   bool _isSubscribed = false;
   bool _isLoading = true;
+  final SubscriptionService _subscriptionService = SubscriptionService();
+  StreamSubscription<List<PurchaseDetails>>? _purchaseStreamSubscription;
 
   @override
   void initState() {
     super.initState();
-    _loadSubscriptionStatus();
+    _initializeSubscription();
+  }
+
+  Future<void> _initializeSubscription() async {
+    // 購入更新のリスナーを設定
+    _subscriptionService.listenToPurchaseUpdates((purchaseDetails) {
+      _handlePurchaseUpdate(purchaseDetails);
+    });
+    
+    // サブスクリプション状態を読み込む
+    await _loadSubscriptionStatus();
   }
 
   Future<void> _loadSubscriptionStatus() async {
-    final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _isSubscribed = prefs.getBool('is_subscribed') ?? false;
+      _isLoading = true;
+    });
+    
+    final bool subscribed = await SubscriptionService.isSubscribed();
+    setState(() {
+      _isSubscribed = subscribed;
       _isLoading = false;
     });
   }
 
-  Future<void> _toggleSubscription() async {
-    final prefs = await SharedPreferences.getInstance();
-    final newStatus = !_isSubscribed;
-    await prefs.setBool('is_subscribed', newStatus);
-    setState(() {
-      _isSubscribed = newStatus;
-    });
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(newStatus ? 'プレミアムプランに登録しました' : 'プレミアムプランを解約しました'),
-          backgroundColor: newStatus ? const Color(0xFF4CAF50) : Colors.grey[700],
-        ),
-      );
+  void _handlePurchaseUpdate(PurchaseDetails purchaseDetails) {
+    if (purchaseDetails.status == PurchaseStatus.purchased ||
+        purchaseDetails.status == PurchaseStatus.restored) {
+      // 購入が完了した場合
+      _loadSubscriptionStatus();
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('プレミアムプランに登録しました'),
+            backgroundColor: Color(0xFF4CAF50),
+          ),
+        );
+      }
+    } else if (purchaseDetails.status == PurchaseStatus.error) {
+      // エラーが発生した場合
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('購入に失敗しました: ${purchaseDetails.error?.message ?? "不明なエラー"}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } else if (purchaseDetails.status == PurchaseStatus.pending) {
+      // 購入処理中（支払いシートが表示されている）
+      if (mounted) {
+        setState(() {
+          _isLoading = true;
+        });
+      }
     }
+  }
+
+  Future<void> _purchaseSubscription() async {
+    if (_isSubscribed) {
+      // 既に購入済みの場合は解約処理（実際の解約はApp Storeの設定から）
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('解約はApp Storeの設定から行ってください'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final bool success = await _subscriptionService.purchaseSubscription();
+      if (success && mounted) {
+        // 購入フロー開始済み → 支払いシートが表示される想定
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('購入画面を表示しています。支払いシートが下に出ない場合は、設定＞デベロッパ＞サンドボックスアカウントでログインしてください。'),
+            backgroundColor: Color(0xFF6B4EE6),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      } else if (!success && mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('購入に失敗しました。プロダクトが見つからない可能性があります。App Store Connectでサブスクリプションをアプリバージョンに紐付けて提出してください。'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+      // 成功した場合は支払いシートが表示され、購入完了は_handlePurchaseUpdateで処理される
+      // ローディング状態は_handlePurchaseUpdateで管理される
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('エラーが発生しました: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _restorePurchases() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      await _subscriptionService.restorePurchases();
+      await _loadSubscriptionStatus();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('購入情報を復元しました'),
+            backgroundColor: Color(0xFF4CAF50),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('復元に失敗しました: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _purchaseStreamSubscription?.cancel();
+    _subscriptionService.dispose();
+    super.dispose();
   }
 
   @override
@@ -262,21 +403,13 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '年額プラン ¥5,000 (¥417/月相当)',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.white.withOpacity(0.8),
-                              ),
-                            ),
                           ],
                         ),
                       ),
                     const SizedBox(height: 24),
                     // アクションボタン
                     ElevatedButton(
-                      onPressed: _toggleSubscription,
+                      onPressed: _isLoading ? null : _purchaseSubscription,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _isSubscribed
                             ? Colors.grey[200]
@@ -290,25 +423,27 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                         ),
                         elevation: 0,
                       ),
-                      child: Text(
-                        _isSubscribed ? 'プランを解約する' : 'プレミアムに登録する',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : Text(
+                              _isSubscribed ? 'プランを解約する' : 'プレミアムに登録する',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                     ),
                     if (!_isSubscribed) ...[
                       const SizedBox(height: 12),
                       TextButton(
-                        onPressed: () {
-                          // 購入の復元処理
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('購入情報を確認中...'),
-                            ),
-                          );
-                        },
+                        onPressed: _isLoading ? null : _restorePurchases,
                         child: Text(
                           '購入を復元する',
                           style: TextStyle(

@@ -7,6 +7,7 @@ import 'package:soft_tennis_scoring/models/point_detail.dart';
 import 'package:soft_tennis_scoring/services/subscription_service.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:intl/intl.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 
 class StatisticsScreen extends StatefulWidget {
   const StatisticsScreen({super.key});
@@ -2626,6 +2627,33 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   Future<void> _showSubscriptionDialog() async {
     final service = SubscriptionService();
     
+    // 購入更新のリスナーを設定
+    service.listenToPurchaseUpdates((purchaseDetails) {
+      if (purchaseDetails.status == PurchaseStatus.purchased ||
+          purchaseDetails.status == PurchaseStatus.restored) {
+        // 購入が完了した場合
+        _checkSubscriptionStatus();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('プレミアムにアップグレードしました'),
+              backgroundColor: Color(0xFF4CAF50),
+            ),
+          );
+        }
+      } else if (purchaseDetails.status == PurchaseStatus.error) {
+        // エラーが発生した場合
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('購入に失敗しました: ${purchaseDetails.error?.message ?? "不明なエラー"}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    });
+    
     if (!mounted) return;
     
     showDialog(
@@ -2662,21 +2690,30 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(context);
-              final success = await service.purchaseSubscription();
-              if (success && mounted) {
-                await _checkSubscriptionStatus();
+              
+              // プロダクトが利用可能か確認
+              final product = await service.getSubscriptionProduct();
+              if (product == null && mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('プレミアムにアップグレードしました'),
+                    content: Text('プロダクトが見つかりません。\nApp Store Connectでプロダクトが承認されているか確認してください。\nまた、サンドボックステストアカウントでログインしているか確認してください。'),
+                    backgroundColor: Colors.red,
+                    duration: Duration(seconds: 5),
                   ),
                 );
-              } else if (mounted) {
+                return;
+              }
+              
+              final success = await service.purchaseSubscription();
+              if (!success && mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('購入に失敗しました'),
+                    content: Text('購入に失敗しました。'),
+                    backgroundColor: Colors.red,
                   ),
                 );
               }
+              // 成功した場合は支払いシートが表示され、購入完了はリスナーで処理される
             },
             child: const Text('購入'),
           ),

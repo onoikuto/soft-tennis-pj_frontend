@@ -1,7 +1,7 @@
 name: soft_tennis_scoring
 description: ソフトテニスの採点表アプリ
 publish_to: 'none'
-version: 1.0.1+6
+version: 1.0.2+7
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -23,7 +23,7 @@ dependencies:
   intl: ^0.18.1
   
   # サブスクリプション（iOS/Androidのみ、macOSでは使用しない）
-  # in_app_purchase: ^3.1.13  # macOSビルドエラーのため一時的にコメントアウト
+  in_app_purchase: ^3.1.13
   
   # 広告
   google_mobile_ads: ^5.0.0
