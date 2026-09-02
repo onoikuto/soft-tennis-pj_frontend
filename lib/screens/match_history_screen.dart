@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:soft_tennis_scoring/database/database_helper.dart';
 import 'package:soft_tennis_scoring/models/match.dart';
+import 'package:soft_tennis_scoring/screens/match_detail_screen.dart';
 import 'package:soft_tennis_scoring/screens/official_scoring_screen.dart';
 import 'package:intl/intl.dart';
 
@@ -349,11 +350,13 @@ class _MatchHistoryScreenState extends State<MatchHistoryScreen> {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(16),
                             onTap: () {
+                              // 終了した試合は閲覧用の詳細画面、進行中の試合は採点画面へ
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) =>
-                                      OfficialScoringScreen(matchId: match.id!),
+                                  builder: (context) => isCompleted
+                                      ? MatchDetailScreen(matchId: match.id!)
+                                      : OfficialScoringScreen(matchId: match.id!),
                                 ),
                               ).then((_) => _loadMatches());
                             },

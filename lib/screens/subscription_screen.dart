@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:soft_tennis_scoring/screens/privacy_policy_screen.dart';
 import 'package:soft_tennis_scoring/services/subscription_service.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
-import 'package:flutter/foundation.dart';
 import 'dart:async';
 
 class SubscriptionScreen extends StatefulWidget {
@@ -19,6 +18,10 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   final SubscriptionService _subscriptionService = SubscriptionService();
   StreamSubscription<List<PurchaseDetails>>? _purchaseStreamSubscription;
 
+  /// App Store Connect側で設定された実際のサブスクリプション商品情報
+  /// （価格・期間はここから取得し、ハードコードしない）
+  ProductDetails? _product;
+
   @override
   void initState() {
     super.initState();
@@ -30,7 +33,13 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     _subscriptionService.listenToPurchaseUpdates((purchaseDetails) {
       _handlePurchaseUpdate(purchaseDetails);
     });
-    
+
+    // 実際の商品情報（価格など）を取得
+    final product = await _subscriptionService.getSubscriptionProduct();
+    if (mounted) {
+      setState(() => _product = product);
+    }
+
     // サブスクリプション状態を読み込む
     await _loadSubscriptionStatus();
   }
@@ -86,6 +95,22 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     }
   }
 
+  /// 購入失敗理由をユーザー向けの文言に変換
+  ///
+  /// 開発者向けの技術的な詳細（Product IDやApp Store Connectの設定に関する内容）は
+  /// SubscriptionService側でログにのみ出力しており、ここでは一般的な案内のみを表示する。
+  String _purchaseFailureMessage() {
+    switch (SubscriptionService.lastFailureReason) {
+      case PurchaseFailureReason.storeUnavailable:
+        return 'App Storeに接続できませんでした。ネットワーク環境をご確認のうえ、再度お試しください。';
+      case PurchaseFailureReason.productNotFound:
+        return '現在プレミアムプランを購入できません。しばらくしてから再度お試しいただくか、アプリを最新版に更新してください。';
+      case PurchaseFailureReason.purchaseFlowFailed:
+      case PurchaseFailureReason.none:
+        return '購入処理を開始できませんでした。しばらくしてから再度お試しください。';
+    }
+  }
+
   Future<void> _purchaseSubscription() async {
     if (_isSubscribed) {
       // 既に購入済みの場合は解約処理（実際の解約はApp Storeの設定から）
@@ -100,9 +125,11 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
 
     try {
       final bool success = await _subscriptionService.purchaseSubscription();
@@ -120,24 +147,36 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
           _isLoading = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('購入に失敗しました。プロダクトが見つからない可能性があります。App Store Connectでサブスクリプションをアプリバージョンに紐付けて提出してください。'),
+          SnackBar(
+            content: Text(_purchaseFailureMessage()),
             backgroundColor: Colors.red,
-            duration: Duration(seconds: 5),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: '再試行',
+              textColor: Colors.white,
+              onPressed: _purchaseSubscription,
+            ),
           ),
         );
       }
       // 成功した場合は支払いシートが表示され、購入完了は_handlePurchaseUpdateで処理される
       // ローディング状態は_handlePurchaseUpdateで管理される
     } catch (e) {
+      // 開発者向けの詳細はログにのみ出力し、ユーザーには一般的な文言を表示する
+      debugPrint('購入処理で予期しないエラー: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('エラーが発生しました: $e'),
+            content: const Text('購入処理でエラーが発生しました。しばらくしてから再度お試しください。'),
             backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: '再試行',
+              textColor: Colors.white,
+              onPressed: _purchaseSubscription,
+            ),
           ),
         );
       }
@@ -379,30 +418,39 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  '¥500',
-                                  style: TextStyle(
-                                    fontSize: 36,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                Padding(
-                                  padding: EdgeInsets.only(bottom: 6),
-                                  child: Text(
-                                    ' / 月',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.white70,
+                            if (_product != null)
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    _product!.price,
+                                    style: const TextStyle(
+                                      fontSize: 36,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
                                     ),
                                   ),
+                                  const Padding(
+                                    padding: EdgeInsets.only(bottom: 6),
+                                    child: Text(
+                                      ' / 月',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            else
+                              const Text(
+                                '価格を読み込めませんでした',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.white70,
                                 ),
-                              ],
-                            ),
+                              ),
                           ],
                         ),
                       ),
@@ -487,43 +535,70 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    // 利用規約へのリンク
-                    Center(
-                      child: TextButton(
-                        onPressed: () async {
-                          final url = Uri.parse('https://onoikuto.github.io/soft-tennis-pj_frontend/terms_of_service.html');
-                          if (await canLaunchUrl(url)) {
-                            await launchUrl(url, mode: LaunchMode.externalApplication);
-                          } else {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('利用規約ページを開けませんでした'),
-                                ),
-                              );
+                    // 利用規約・プライバシーポリシーへのリンク
+                    // （Appleガイドライン3.1.2: 自動更新サブスクリプションは購入前に
+                    //  利用規約とプライバシーポリシーの両方へのリンクを明示する必要がある）
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        TextButton(
+                          onPressed: () async {
+                            final url = Uri.parse('https://onoikuto.github.io/soft-tennis-pj_frontend/terms_of_service.html');
+                            if (await canLaunchUrl(url)) {
+                              await launchUrl(url, mode: LaunchMode.externalApplication);
+                            } else {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('利用規約ページを開けませんでした'),
+                                  ),
+                                );
+                              }
                             }
-                          }
-                        },
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '利用規約',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                                decoration: TextDecoration.underline,
+                          },
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '利用規約',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                  decoration: TextDecoration.underline,
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 4),
-                            Icon(
-                              Icons.open_in_new,
-                              size: 14,
-                              color: Colors.grey[600],
-                            ),
-                          ],
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.open_in_new,
+                                size: 14,
+                                color: Colors.grey[600],
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
+                        Text(
+                          '  ・  ',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const PrivacyPolicyScreen(),
+                              ),
+                            );
+                          },
+                          child: Text(
+                            'プライバシーポリシー',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),

@@ -6,6 +6,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'package:soft_tennis_scoring/database/database_helper.dart';
 import 'package:soft_tennis_scoring/screens/main_menu_screen.dart';
+import 'package:soft_tennis_scoring/services/subscription_service.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 void main() async {
@@ -58,8 +59,8 @@ void main() async {
     }
     
     // Google Mobile Adsの初期化（モバイル版のみ、macOSは除外）
-    if (!kIsWeb && 
-        (defaultTargetPlatform == TargetPlatform.android || 
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
          defaultTargetPlatform == TargetPlatform.iOS)) {
       try {
         debugPrint('📱 Google Mobile Ads初期化開始...');
@@ -70,16 +71,28 @@ void main() async {
         debugPrint('スタックトレース: $stackTrace');
       }
     }
-    
+
+    // サブスクリプション状態を購入履歴と同期
+    // 機種変更・再インストール後の同期漏れや、バックグラウンドで完了した
+    // 購入（Ask to Buy等）を取りこぼさないよう、起動時に必ず一度実行する
+    try {
+      debugPrint('💳 サブスクリプション状態の同期開始...');
+      await SubscriptionService.syncOnAppStart();
+      debugPrint('✅ サブスクリプション状態の同期成功');
+    } catch (e, stackTrace) {
+      debugPrint('❌ サブスクリプション状態の同期エラー: $e');
+      debugPrint('スタックトレース: $stackTrace');
+    }
+
     debugPrint('🚀 アプリを起動します...');
     runApp(const MyApp());
   }, (error, stackTrace) {
     // 予期しないエラーが発生した場合の処理
+    // runAppを再度呼ぶとensureInitialized時と異なるZoneになりZone mismatchで
+    // クラッシュするため、ログ出力のみ行う（画面側はErrorWidget.builderが処理する）
     debugPrint('❌❌❌ 予期しないエラーが発生しました ❌❌❌');
     debugPrint('エラー: $error');
     debugPrint('スタックトレース: $stackTrace');
-    // エラーが発生してもアプリを起動
-    runApp(const MyApp());
   });
 }
 

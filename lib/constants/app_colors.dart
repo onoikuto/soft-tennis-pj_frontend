@@ -1,5 +1,7 @@
+import 'package:flutter/material.dart';
+
 /// アプリ全体で使用する色の定数
-/// 
+///
 /// シンプルなカラーパレットを定義します。
 class AppColors {
   AppColors._(); // インスタンス化を防ぐ
