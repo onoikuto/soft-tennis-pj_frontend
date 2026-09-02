@@ -1,0 +1,14 @@
+name = "soft-tennis-ai-insight"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# 1端末あたりの1日の呼び出し回数を数えるためのKV。
+# 作成後に id を埋めてください:
+#   npx wrangler kv namespace create RATE_LIMIT
+# id が空のままでも Worker は動きます（その場合は回数制限だけが無効）。
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT"
+# id = ""
+
+# GEMINI_API_KEY はここに書かず、シークレットとして登録してください:
+#   npx wrangler secret put GEMINI_API_KEY
