@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:soft_tennis_scoring/models/game_score.dart';
 import 'package:soft_tennis_scoring/models/match.dart';
 import 'package:soft_tennis_scoring/models/point_detail.dart';
@@ -329,6 +330,102 @@ void main() {
     test('空やnullはnullのまま', () {
       expect(LiveCoachService.sanitize(null), isNull);
       expect(LiveCoachService.sanitize('   \n  '), isNull);
+    });
+  });
+
+  group('LiveCoachService.advise', () {
+    setUp(() {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      LiveCoachService.resetForTest();
+    });
+
+    test('課金していれば定型文の助言が返る（端末内LLMなしでも動く）', () async {
+      SharedPreferences.setMockInitialValues({'flutter.is_subscribed': true});
+
+      final input = _input(
+        gameScores: [_game(1, 0, 3)],
+        pointDetails: [
+          for (var i = 1; i <= 3; i++)
+            _point(
+                gameNumber: 1,
+                pointNumber: i,
+                serverTeam: 'team1',
+                pointWinner: 'team2'),
+        ],
+      );
+
+      final update = await LiveCoachService.advise(input);
+      expect(update.message, isNotNull);
+      expect(update.message!.key, 'loss_streak');
+      expect(update.message!.phrasedByAi, isFalse);
+      expect(update.message!.text, contains('3本連続で失点'));
+    });
+
+    test('課金していなければ何も返さない', () async {
+      SharedPreferences.setMockInitialValues({'flutter.is_subscribed': false});
+
+      final input = _input(
+        gameScores: [_game(1, 0, 3)],
+        pointDetails: [
+          for (var i = 1; i <= 3; i++)
+            _point(
+                gameNumber: 1,
+                pointNumber: i,
+                serverTeam: 'team1',
+                pointWinner: 'team2'),
+        ],
+      );
+
+      final update = await LiveCoachService.advise(input);
+      expect(update.message, isNull);
+      expect(update.keepCurrent, isFalse);
+    });
+
+    test('同じ助言を続けて求めても、間隔が空くまでは出し直さない', () async {
+      SharedPreferences.setMockInitialValues({'flutter.is_subscribed': true});
+
+      final input = _input(
+        gameScores: [_game(1, 0, 3)],
+        pointDetails: [
+          for (var i = 1; i <= 3; i++)
+            _point(
+                gameNumber: 1,
+                pointNumber: i,
+                serverTeam: 'team1',
+                pointWinner: 'team2'),
+        ],
+      );
+
+      expect((await LiveCoachService.advise(input)).message, isNotNull);
+
+      final second = await LiveCoachService.advise(input);
+      expect(second.message, isNull);
+      // 表示は消さずに残す
+      expect(second.keepCurrent, isTrue);
+    });
+
+    test('出す助言がなくなったら表示を消す指示になる', () async {
+      SharedPreferences.setMockInitialValues({'flutter.is_subscribed': true});
+
+      final input = _input(
+        gameScores: [_game(1, 1, 1)],
+        pointDetails: [
+          _point(
+              gameNumber: 1,
+              pointNumber: 1,
+              serverTeam: 'team1',
+              pointWinner: 'team1'),
+          _point(
+              gameNumber: 1,
+              pointNumber: 2,
+              serverTeam: 'team1',
+              pointWinner: 'team2'),
+        ],
+      );
+
+      final update = await LiveCoachService.advise(input);
+      expect(update.message, isNull);
+      expect(update.keepCurrent, isFalse);
     });
   });
 

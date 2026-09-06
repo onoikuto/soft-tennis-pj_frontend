@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'dart:async';
 
+import 'package:soft_tennis_scoring/config/ai_config.dart';
+
 /// 購入処理が失敗した理由
 ///
 /// UI側でユーザー向けの文言に変換するために使用します。
@@ -40,6 +42,12 @@ class SubscriptionService {
   
   /// サブスクリプション状態を取得
   static Future<bool> isSubscribed() async {
+    // 動作確認用の抜け道。シミュレータでは課金できないため、
+    // `--dart-define=AI_FORCE_PREMIUM=true` でプレミアム扱いにできます。
+    // **デバッグビルドでしか効きません。** リリースビルドに紛れ込んでも
+    // kDebugMode が false なので課金の迂回にはなりません。
+    if (kDebugMode && AiConfig.forcePremium) return true;
+
     // SharedPreferencesから状態を取得
     // 購入履歴の確認はrestorePurchases()とpurchaseStreamで行う
     final prefs = await SharedPreferences.getInstance();
