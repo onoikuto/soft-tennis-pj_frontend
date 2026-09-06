@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:soft_tennis_scoring/database/database_helper.dart';
 import 'package:soft_tennis_scoring/services/ai_insight_service.dart';
+import 'package:soft_tennis_scoring/services/live_coach_engine.dart';
+import 'package:soft_tennis_scoring/services/live_coach_service.dart';
+import 'package:soft_tennis_scoring/services/statistics_calculator.dart';
 import 'package:soft_tennis_scoring/models/match.dart';
 import 'package:soft_tennis_scoring/models/game_score.dart';
 import 'package:soft_tennis_scoring/models/point_detail.dart';
@@ -8,6 +13,7 @@ import 'package:soft_tennis_scoring/screens/main_menu_screen.dart';
 import 'package:soft_tennis_scoring/services/subscription_service.dart';
 import 'package:soft_tennis_scoring/utils/game_rules.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/match_settings_dialog.dart';
+import 'package:soft_tennis_scoring/widgets/scoring/live_advice_card.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/point_detail_dialog.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/score_table_cells.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/scoring_sheet_table.dart';
@@ -33,12 +39,28 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
   bool _firstServeIn = true; // 1stサーブ選択（メイン画面用）
   List<PointDetail> _pointDetails = []; // 詳細ポイントデータ
 
+  /// 自分側のチーム（'team1' / 'team2'）
+  ///
+  /// 統計画面で直近に見ていた対象から決めます。手がかりがないときは
+  /// チーム1として扱います（統計まわりの既存の挙動に合わせています）。
+  String _myTeam = 'team1';
+
+  /// いま表示している試合中アドバイス（未表示のときnull）
+  LiveCoachMessage? _liveAdvice;
+
   @override
   void initState() {
     super.initState();
     _loadSubscriptionStatus();
     _loadDetailModeSetting();
     _loadMatchData();
+  }
+
+  @override
+  void dispose() {
+    // 端末内LLMはメモリを大きく使うので、試合画面を離れたら解放する
+    unawaited(LiveCoachService.onLeaveMatch());
+    super.dispose();
   }
 
   /// サブスクリプション状態を読み込む
@@ -146,6 +168,54 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     );
   }
 
+  /// 自分側のチームを、統計画面で直近に見ていた対象から決める
+  ///
+  /// 採点票は両チームぶんを記録するため、どちら側に向けて助言するかを
+  /// 決めないと、相手への助言が出てしまいます。
+  Future<void> _resolveMyTeam() async {
+    final match = _match;
+    if (match == null) return;
+
+    StatsSubject? subject;
+    try {
+      subject = await AiInsightService.lastViewedSubject();
+    } catch (e) {
+      debugPrint('自チームの判定に失敗（チーム1として扱います）: $e');
+      return;
+    }
+    if (subject == null || !subject.covers(match)) return;
+
+    final team = subject.isTeam1(match) ? 'team1' : 'team2';
+    if (!mounted || team == _myTeam) return;
+    setState(() => _myTeam = team);
+  }
+
+  /// 試合中アドバイスを取り直す
+  ///
+  /// 生成に数秒かかることがあるため、**待たずに**進めます。入力が止まると
+  /// 採点票として使い物にならないためです。間に合ったぶんだけ画面に出します。
+  void _refreshLiveAdvice() {
+    final match = _match;
+    if (match == null || _isMatchCompleted) return;
+
+    final input = LiveCoachInput(
+      match: match,
+      gameScores: _gameScores,
+      pointDetails: _pointDetails,
+      myTeam: _myTeam,
+      detailMode: _detailMode,
+    );
+
+    LiveCoachService.advise(input).then((update) {
+      if (!mounted || update.keepCurrent) return;
+      // 出す助言がなくなったときは消す（古い助言が残り続けないように）
+      setState(() => _liveAdvice = update.message);
+    }).catchError((Object e) {
+      // 助言が出せなくても採点の邪魔はしない
+      debugPrint('試合中アドバイスの取得に失敗: $e');
+    });
+  }
+
   Future<void> _loadMatchData() async {
     setState(() => _isLoading = true);
     final match = await DatabaseHelper.instance.getMatch(widget.matchId);
@@ -194,6 +264,13 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
       // ゲームスコアが存在しない場合も、_currentGameは既に設定されているので変更しない
       _isLoading = false;
     });
+
+    // 試合が終わったら助言は残さない（画面に古い助言が居座るため）
+    if (_isMatchCompleted && _liveAdvice != null) {
+      setState(() => _liveAdvice = null);
+    }
+
+    await _resolveMyTeam();
   }
 
   /// ゲーム開始時の最初のサーバー選手を決定
@@ -616,6 +693,9 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     } else {
       await _loadMatchData();
     }
+
+    // 助言の生成は待たない（採点の手を止めないため）
+    _refreshLiveAdvice();
   }
   
   /// ファイナルゲームかどうかを判定
@@ -1178,6 +1258,12 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
             ),
             child: Column(
               children: [
+                // 試合中アドバイス（プレミアム限定・入力ボタンのすぐ上に出す）
+                if (_liveAdvice != null)
+                  LiveAdviceCard(
+                    message: _liveAdvice!,
+                    onDismiss: () => setState(() => _liveAdvice = null),
+                  ),
                 // 分析+モードがONの場合、1stサーブ選択を表示
                 if (_detailMode) ...[
                   Container(

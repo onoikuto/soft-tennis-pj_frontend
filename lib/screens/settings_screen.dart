@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:soft_tennis_scoring/widgets/settings/local_ai_card.dart';
+
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
@@ -20,33 +22,37 @@ class SettingsScreen extends StatelessWidget {
         ),
         centerTitle: true,
       ),
-      body: const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.settings,
-              size: 64,
-              color: Colors.grey,
-            ),
-            SizedBox(height: 16),
-            Text(
+      body: ListView(
+        children: const [
+          // 端末内AIが有効なビルドのときだけ中身が出る
+          LocalAiCard(),
+          SizedBox(height: 48),
+          Icon(
+            Icons.settings,
+            size: 64,
+            color: Colors.grey,
+          ),
+          SizedBox(height: 16),
+          Center(
+            child: Text(
               '設定',
               style: TextStyle(
                 fontSize: 18,
                 color: Colors.grey,
               ),
             ),
-            SizedBox(height: 8),
-            Text(
+          ),
+          SizedBox(height: 8),
+          Center(
+            child: Text(
               '今後実装予定',
               style: TextStyle(
                 fontSize: 14,
                 color: Colors.grey,
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

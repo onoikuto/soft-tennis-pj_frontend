@@ -102,6 +102,17 @@ class AiInsightService {
     await prefs.setString(_lastSubjectNameKey, subject.name);
   }
 
+  /// 直近に統計画面で見ていた対象を取り出す
+  ///
+  /// 試合中のアドバイスで「どちらのチームが自分か」を決めるのに使います。
+  /// 一度も統計画面を開いていない場合はnullです。
+  static Future<StatsSubject?> lastViewedSubject() async {
+    final prefs = await SharedPreferences.getInstance();
+    final name = prefs.getString(_lastSubjectNameKey);
+    if (name == null || name.isEmpty) return null;
+    return StatsSubject(prefs.getInt(_lastSubjectViewKey) ?? 0, name);
+  }
+
   /// 試合を保存した直後に呼ぶ
   ///
   /// 直近に統計画面で見ていた対象の分析を作り直します。統計画面を一度も
