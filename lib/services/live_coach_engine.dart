@@ -91,7 +91,8 @@ class LiveCoachEngine {
     _addStreakAdvice(input, advices);
     _addServeAdvice(input, advices);
     _addPointTypeAdvice(input, advices);
-    _addSituationAdvice(input, advices);
+    _addShotAdvice(input, advices);
+    _addGameBreakAdvice(input, advices);
 
     advices.sort((a, b) => b.priority.compareTo(a.priority));
     return advices;
@@ -192,67 +193,173 @@ class LiveCoachEngine {
     }
   }
 
-  /// 局面（ファイナル・ゲームポイント・デュース）への助言
-  static void _addSituationAdvice(LiveCoachInput input, List<LiveAdvice> out) {
-    final current = _currentGameScore(input);
-    if (current == null) return;
+  /// 球種・ミスの種類からの助言
+  ///
+  /// 詳細入力モードで、かつ選手が入力をスキップしなかったぶんだけ見ます
+  /// （どちらも任意入力なので、未入力を「無かったこと」と数えないよう
+  /// 入力済みの件数を母数にします）。
+  static void _addShotAdvice(LiveCoachInput input, List<LiveAdvice> out) {
+    if (!input.detailMode) return;
 
-    final myScore =
-        input.myTeam == 'team1' ? current.team1Score : current.team2Score;
-    final theirScore =
-        input.myTeam == 'team1' ? current.team2Score : current.team1Score;
+    // 自分たちのミスによる失点
+    final ownErrors = input.pointDetails
+        .where((p) =>
+            p.pointWinner == input.opponentTeam &&
+            p.pointType == PointType.opponentError)
+        .toList();
 
-    final isFinal = GameRules.isFinalGame(
-      gameCount: input.match.gameCount,
-      gameScores: input.gameScores,
-      gameNumber: current.gameNumber,
-    );
-
-    if (isFinal) {
+    // どの球種で崩れているか
+    final shots = _countBy(ownErrors, (p) => p.shotType);
+    final topShot = _mostCommon(shots);
+    // 入力済み8本以上・その球種が半分以上でないと、偏りとは言えない
+    if (topShot != null && shots.total >= 8 && topShot.count * 2 >= shots.total) {
+      final label = ShotType.getDisplay(topShot.key);
       out.add(LiveAdvice(
-        key: 'final_game',
-        headline: 'ファイナル',
-        template: 'ファイナルゲームです。$myScore-$theirScoreの場面、'
-            '守りに入らず、これまで取れていた形をもう一度やりましょう。',
+        key: 'error_shot_concentrated',
+        headline: '$labelを整える',
+        template: 'ミスの${topShot.count}本が$labelです。'
+            'この球はいったん確実に返すことを優先しましょう。',
+        priority: 75,
+        facts: {
+          '崩れている球種': label,
+          'その球種でのミス': '${topShot.count}本',
+          '入力済みのミス': '${shots.total}本',
+        },
+      ));
+    }
+
+    // ネットかアウトか（直し方が逆になるので分けて言う）
+    final errorTypes = _countBy(ownErrors, (p) => p.errorType);
+    final topError = _mostCommon(errorTypes);
+    if (topError != null &&
+        errorTypes.total >= 8 &&
+        topError.count * 5 >= errorTypes.total * 3) {
+      final advice = switch (topError.key) {
+        ErrorType.net => '軌道を少し上げて、ネットの上を通す幅を作りましょう。',
+        ErrorType.out => '振り切らず、回転をかけて中に収めましょう。',
+        _ => '2ndサーブは確実さを優先しましょう。',
+      };
+      final label = ErrorType.getDisplay(topError.key);
+      out.add(LiveAdvice(
+        key: 'error_type_concentrated',
+        headline: '$labelが多い',
+        template: 'ミスの${topError.count}本が$labelです。$advice',
+        priority: 72,
+        facts: {
+          '多いミス': label,
+          'その本数': '${topError.count}本',
+          '入力済みのミス': '${errorTypes.total}本',
+        },
+      ));
+    }
+
+    // 決まっている球種（伸ばすところも言う）
+    final winners = input.pointDetails
+        .where((p) =>
+            p.pointWinner == input.myTeam && p.pointType == PointType.winner)
+        .toList();
+    final winnerShots = _countBy(winners, (p) => p.shotType);
+    final topWinner = _mostCommon(winnerShots);
+    if (topWinner != null &&
+        winnerShots.total >= 5 &&
+        topWinner.count * 2 >= winnerShots.total) {
+      final label = ShotType.getDisplay(topWinner.key);
+      out.add(LiveAdvice(
+        key: 'winner_shot_strength',
+        headline: '$labelが効いている',
+        template: '$labelで${topWinner.count}本決まっています。'
+            'この形に持ち込む組み立てを続けましょう。',
+        priority: 25,
+        facts: {
+          '決まっている球種': label,
+          'その球種でのウィナー': '${topWinner.count}本',
+        },
+      ));
+    }
+  }
+
+  /// ゲームの区切りでの、ゲームカウントに応じた助言
+  ///
+  /// 助言はゲームが終わったところで出します。プレー中に読ませても頭に
+  /// 入らないうえ、ポイントごとに文言が変わると気が散るためです。
+  /// したがって進行中のゲームは無く、見るのは**ゲームカウント**になります。
+  static void _addGameBreakAdvice(LiveCoachInput input, List<LiveAdvice> out) {
+    var myGames = 0;
+    var theirGames = 0;
+    for (final score in input.gameScores) {
+      if (score.winner == null) continue;
+      if (score.winner == input.myTeam) {
+        myGames++;
+      } else {
+        theirGames++;
+      }
+    }
+    if (myGames + theirGames == 0) return;
+
+    final required = GameRules.requiredGamesToWin(input.match.gameCount);
+    final count = '$myGames-$theirGames';
+
+    // 次がファイナルゲーム（あと1ゲームずつで決まる並び）
+    if (myGames == required - 1 && theirGames == required - 1) {
+      out.add(LiveAdvice(
+        key: 'before_final_game',
+        headline: '次がファイナル',
+        template: '$countで次がファイナルゲームです。'
+            '守りに入らず、ここまで取れていた形をもう一度やりましょう。',
         priority: 90,
-        facts: {'ポイント': '$myScore-$theirScore'},
+        facts: {'ゲームカウント': count},
       ));
       return;
     }
 
-    // 相手のゲームポイント（4ポイント先取・2点差。デュース以降も含む）
-    if (theirScore >= 3 && theirScore - myScore >= 1) {
+    // 相手にあと1ゲームで取られる
+    if (theirGames == required - 1) {
       out.add(LiveAdvice(
-        key: 'facing_game_point',
-        headline: '踏ん張る',
-        template: '相手のゲームポイントです。'
+        key: 'facing_match_game',
+        headline: '後がない',
+        template: '$countで、次を落とすと負けです。'
             '思い切って攻めるより、確実に1本返して長く続けましょう。',
-        priority: 50,
-        facts: {'ポイント': '$myScore-$theirScore'},
+        priority: 65,
+        facts: {'ゲームカウント': count},
       ));
       return;
     }
 
-    if (myScore >= 3 && myScore - theirScore >= 1) {
+    // あと1ゲームで勝てる
+    if (myGames == required - 1) {
       out.add(LiveAdvice(
-        key: 'game_point',
-        headline: '取り切る',
-        template: 'ゲームポイントです。'
+        key: 'game_to_win',
+        headline: 'あと1ゲーム',
+        template: '$countで、次を取れば勝ちです。'
             '新しいことは試さず、いつもどおりのサーブとコースで取り切りましょう。',
-        priority: 40,
-        facts: {'ポイント': '$myScore-$theirScore'},
+        priority: 55,
+        facts: {'ゲームカウント': count},
       ));
       return;
     }
 
-    if (myScore >= 3 && myScore == theirScore) {
+    // 2ゲーム以上離されている
+    if (theirGames - myGames >= 2) {
       out.add(LiveAdvice(
-        key: 'deuce',
-        headline: 'デュース',
-        template: 'デュースです。ここは1本ずつ。'
-            '次のポイントをどう組み立てるか、ペアで一言だけ確認しましょう。',
-        priority: 30,
-        facts: {'ポイント': '$myScore-$theirScore'},
+        key: 'behind',
+        headline: '立て直す',
+        template: '$countです。取り返そうと急がず、'
+            '次の1ゲームだけに集中しましょう。',
+        priority: 20,
+        facts: {'ゲームカウント': count},
+      ));
+      return;
+    }
+
+    // 2ゲーム以上リードしている
+    if (myGames - theirGames >= 2) {
+      out.add(LiveAdvice(
+        key: 'ahead',
+        headline: '緩めない',
+        template: '$countとリードしています。'
+            'ここで形を変えず、同じ入り方を続けましょう。',
+        priority: 15,
+        facts: {'ゲームカウント': count},
       ));
     }
   }
@@ -261,12 +368,32 @@ class LiveCoachEngine {
   // 集計の補助
   // ============================================================================
 
-  /// 進行中のゲーム（勝者が未確定のもの）
-  static GameScore? _currentGameScore(LiveCoachInput input) {
-    for (final score in input.gameScores.reversed) {
-      if (score.winner == null) return score;
+  /// 未入力を除いて数えた集計結果
+  static _Counts _countBy(
+    List<PointDetail> points,
+    String? Function(PointDetail) selector,
+  ) {
+    final counts = <String, int>{};
+    var total = 0;
+    for (final point in points) {
+      final key = selector(point);
+      // 任意入力なので、未入力は母数からも除く
+      if (key == null || key.isEmpty) continue;
+      counts[key] = (counts[key] ?? 0) + 1;
+      total++;
     }
-    return null;
+    return _Counts(counts, total);
+  }
+
+  /// 一番多かった項目（同数のときは名前順で安定させる）
+  static _Entry? _mostCommon(_Counts counts) {
+    _Entry? best;
+    final keys = counts.map.keys.toList()..sort();
+    for (final key in keys) {
+      final count = counts.map[key]!;
+      if (best == null || count > best.count) best = _Entry(key, count);
+    }
+    return best;
   }
 
   /// いま何本連続で失点しているか
@@ -278,4 +405,20 @@ class LiveCoachEngine {
     }
     return streak;
   }
+}
+
+/// 項目ごとの件数と、その合計（未入力を除いたもの）
+class _Counts {
+  final Map<String, int> map;
+  final int total;
+
+  const _Counts(this.map, this.total);
+}
+
+/// 一番多かった項目
+class _Entry {
+  final String key;
+  final int count;
+
+  const _Entry(this.key, this.count);
 }

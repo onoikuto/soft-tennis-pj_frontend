@@ -44,6 +44,8 @@ PointDetail _point({
   required String pointWinner,
   bool firstServeIn = true,
   String pointType = PointType.opponentError,
+  String? shotType,
+  String? errorType,
 }) =>
     PointDetail(
       matchId: 1,
@@ -53,6 +55,8 @@ PointDetail _point({
       firstServeIn: firstServeIn,
       pointWinner: pointWinner,
       pointType: pointType,
+      shotType: shotType,
+      errorType: errorType,
       createdAt: DateTime(2026, 1, 1),
     );
 
@@ -226,7 +230,7 @@ void main() {
       );
     });
 
-    test('ファイナルゲームは連続失点の次に優先される', () {
+    test('3-3で終わったら「次がファイナル」を出す', () {
       final input = _input(
         gameScores: [
           _game(1, 4, 0, winner: 'team1'),
@@ -235,11 +239,10 @@ void main() {
           _game(4, 0, 4, winner: 'team2'),
           _game(5, 4, 0, winner: 'team1'),
           _game(6, 0, 4, winner: 'team2'),
-          _game(7, 3, 2),
         ],
         pointDetails: [
           _point(
-              gameNumber: 7,
+              gameNumber: 6,
               pointNumber: 1,
               serverTeam: 'team1',
               pointWinner: 'team1'),
@@ -247,43 +250,83 @@ void main() {
       );
 
       final advice = LiveCoachEngine.advise(input);
-      expect(advice?.key, 'final_game');
-      expect(advice?.facts['ポイント'], '3-2');
+      expect(advice?.key, 'before_final_game');
+      expect(advice?.facts['ゲームカウント'], '3-3');
     });
 
-    test('相手のゲームポイントは自分のゲームポイントより優先される', () {
+    test('連続失点は次がファイナルより優先される', () {
       final input = _input(
-        gameScores: [_game(1, 1, 3)],
+        gameScores: [
+          _game(1, 4, 0, winner: 'team1'),
+          _game(2, 0, 4, winner: 'team2'),
+          _game(3, 4, 0, winner: 'team1'),
+          _game(4, 0, 4, winner: 'team2'),
+          _game(5, 4, 0, winner: 'team1'),
+          _game(6, 0, 4, winner: 'team2'),
+        ],
+        pointDetails: [
+          for (var i = 1; i <= 4; i++)
+            _point(
+                gameNumber: 6,
+                pointNumber: i,
+                serverTeam: 'team2',
+                pointWinner: 'team2'),
+        ],
+      );
+
+      expect(LiveCoachEngine.advise(input)?.key, 'loss_streak');
+    });
+
+    test('あとがない側の助言は、あと1ゲームで勝てる助言より優先される', () {
+      final input = _input(
+        gameScores: [
+          _game(1, 0, 4, winner: 'team2'),
+          _game(2, 0, 4, winner: 'team2'),
+          _game(3, 0, 4, winner: 'team2'),
+        ],
         pointDetails: [
           _point(
-              gameNumber: 1,
+              gameNumber: 3,
               pointNumber: 1,
               serverTeam: 'team1',
               pointWinner: 'team1'),
-          _point(
-              gameNumber: 1,
-              pointNumber: 2,
-              serverTeam: 'team1',
-              pointWinner: 'team2'),
         ],
       );
 
       final advice = LiveCoachEngine.advise(input);
-      expect(advice?.key, 'facing_game_point');
+      expect(advice?.key, 'facing_match_game');
+      expect(advice?.facts['ゲームカウント'], '0-3');
     });
 
-    test('自分がチーム2のときは自分側の視点で判定する', () {
+    test('あと1ゲームで勝てるときは取り切る助言を出す', () {
       final input = _input(
-        gameScores: [_game(1, 3, 1)],
+        gameScores: [
+          _game(1, 4, 0, winner: 'team1'),
+          _game(2, 4, 0, winner: 'team1'),
+          _game(3, 4, 0, winner: 'team1'),
+        ],
         pointDetails: [
           _point(
-              gameNumber: 1,
+              gameNumber: 3,
               pointNumber: 1,
-              serverTeam: 'team2',
-              pointWinner: 'team2'),
+              serverTeam: 'team1',
+              pointWinner: 'team1'),
+        ],
+      );
+
+      expect(LiveCoachEngine.advise(input)?.key, 'game_to_win');
+    });
+
+    test('自分がチーム2のときはゲームカウントも自分側の視点で数える', () {
+      final input = _input(
+        gameScores: [
+          _game(1, 4, 0, winner: 'team1'),
+          _game(2, 4, 0, winner: 'team1'),
+        ],
+        pointDetails: [
           _point(
-              gameNumber: 1,
-              pointNumber: 2,
+              gameNumber: 2,
+              pointNumber: 1,
               serverTeam: 'team2',
               pointWinner: 'team1'),
         ],
@@ -291,13 +334,13 @@ void main() {
       );
 
       final advice = LiveCoachEngine.advise(input);
-      expect(advice?.key, 'facing_game_point');
-      expect(advice?.facts['ポイント'], '1-3');
+      expect(advice?.key, 'behind');
+      expect(advice?.facts['ゲームカウント'], '0-2');
     });
 
-    test('デュースは3-3以上の同点で出る', () {
+    test('1ゲームも終わっていなければゲームカウントの助言は出さない', () {
       final input = _input(
-        gameScores: [_game(1, 4, 4)],
+        gameScores: [_game(1, 3, 3)],
         pointDetails: [
           _point(
               gameNumber: 1,
@@ -307,7 +350,115 @@ void main() {
         ],
       );
 
-      expect(LiveCoachEngine.advise(input)?.key, 'deuce');
+      expect(LiveCoachEngine.advise(input), isNull);
+    });
+  });
+
+  group('LiveCoachEngine 球種・ミスの種類', () {
+    /// 自分たちのミスによる失点を作る
+    List<PointDetail> ownErrors({
+      required int count,
+      String? shotType,
+      String? errorType,
+      int startAt = 1,
+    }) =>
+        [
+          for (var i = 0; i < count; i++)
+            _point(
+              gameNumber: 1 + ((startAt + i) ~/ 4),
+              pointNumber: startAt + i,
+              serverTeam: 'team2',
+              pointWinner: 'team2',
+              pointType: PointType.opponentError,
+              shotType: shotType,
+              errorType: errorType,
+            ),
+        ];
+
+    test('特定の球種にミスが偏っていれば指摘する', () {
+      final points = [
+        ...ownErrors(count: 5, shotType: ShotType.backhand, errorType: ErrorType.net),
+        ...ownErrors(
+            count: 4,
+            shotType: ShotType.forehand,
+            errorType: ErrorType.out,
+            startAt: 6),
+      ];
+
+      final advices = LiveCoachEngine.evaluate(_input(
+        gameScores: [_game(1, 0, 4, winner: 'team2'), _game(2, 0, 4, winner: 'team2')],
+        pointDetails: points,
+        detailMode: true,
+      ));
+
+      final shot = advices.firstWhere((a) => a.key == 'error_shot_concentrated');
+      expect(shot.facts['崩れている球種'], 'バックハンド');
+      expect(shot.facts['その球種でのミス'], '5本');
+      expect(shot.facts['入力済みのミス'], '9本');
+    });
+
+    test('球種が未入力のぶんは母数に数えない', () {
+      // 入力済みはバックハンド3本だけ。8本に届かないので出さない。
+      final points = [
+        ...ownErrors(count: 3, shotType: ShotType.backhand),
+        ...ownErrors(count: 9, startAt: 4),
+      ];
+
+      final keys = LiveCoachEngine.evaluate(_input(
+        gameScores: [_game(1, 0, 4, winner: 'team2'), _game(2, 0, 4, winner: 'team2')],
+        pointDetails: points,
+        detailMode: true,
+      )).map((a) => a.key);
+
+      expect(keys, isNot(contains('error_shot_concentrated')));
+    });
+
+    test('ネットが多いときとアウトが多いときで直し方を変える', () {
+      final net = LiveCoachEngine.evaluate(_input(
+        gameScores: [_game(1, 0, 4, winner: 'team2'), _game(2, 0, 4, winner: 'team2')],
+        pointDetails: ownErrors(count: 8, errorType: ErrorType.net),
+        detailMode: true,
+      )).firstWhere((a) => a.key == 'error_type_concentrated');
+      expect(net.template, contains('軌道を少し上げて'));
+
+      final out = LiveCoachEngine.evaluate(_input(
+        gameScores: [_game(1, 0, 4, winner: 'team2'), _game(2, 0, 4, winner: 'team2')],
+        pointDetails: ownErrors(count: 8, errorType: ErrorType.out),
+        detailMode: true,
+      )).firstWhere((a) => a.key == 'error_type_concentrated');
+      expect(out.template, contains('回転をかけて'));
+    });
+
+    test('決まっている球種は強みとして出す', () {
+      final points = [
+        for (var i = 1; i <= 5; i++)
+          _point(
+            gameNumber: 1,
+            pointNumber: i,
+            serverTeam: 'team1',
+            pointWinner: 'team1',
+            pointType: PointType.winner,
+            shotType: ShotType.smash,
+          ),
+      ];
+
+      final advice = LiveCoachEngine.evaluate(_input(
+        gameScores: [_game(1, 4, 0, winner: 'team1')],
+        pointDetails: points,
+        detailMode: true,
+      )).firstWhere((a) => a.key == 'winner_shot_strength');
+
+      expect(advice.facts['決まっている球種'], 'スマッシュ');
+      expect(advice.template, contains('スマッシュで5本決まっています'));
+    });
+
+    test('詳細モードでなければ球種は見ない', () {
+      final keys = LiveCoachEngine.evaluate(_input(
+        gameScores: [_game(1, 0, 4, winner: 'team2'), _game(2, 0, 4, winner: 'team2')],
+        pointDetails: ownErrors(count: 10, shotType: ShotType.backhand),
+      )).map((a) => a.key);
+
+      expect(keys, isNot(contains('error_shot_concentrated')));
     });
   });
 

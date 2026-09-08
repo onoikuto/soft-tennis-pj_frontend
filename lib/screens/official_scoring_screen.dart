@@ -694,8 +694,12 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
       await _loadMatchData();
     }
 
-    // 助言の生成は待たない（採点の手を止めないため）
-    _refreshLiveAdvice();
+    // 助言はゲームが終わったところでだけ出す。プレー中に読ませても頭に
+    // 入らないうえ、ポイントごとに文言が変わると気が散るため。
+    // 生成は待たない（採点の手を止めないため）。
+    if (winner != null) {
+      _refreshLiveAdvice();
+    }
   }
   
   /// ファイナルゲームかどうかを判定
