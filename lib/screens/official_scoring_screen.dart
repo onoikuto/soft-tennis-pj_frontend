@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:soft_tennis_scoring/database/database_helper.dart';
 import 'package:soft_tennis_scoring/services/ai_insight_service.dart';
-import 'package:soft_tennis_scoring/services/live_coach_engine.dart';
 import 'package:soft_tennis_scoring/services/live_coach_service.dart';
 import 'package:soft_tennis_scoring/services/advanced_stats.dart';
 import 'package:soft_tennis_scoring/services/pair_report.dart';
@@ -16,7 +15,7 @@ import 'package:soft_tennis_scoring/services/subscription_service.dart';
 import 'package:soft_tennis_scoring/utils/game_rules.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/match_settings_dialog.dart';
 import 'package:soft_tennis_scoring/widgets/common/pair_report_view.dart';
-import 'package:soft_tennis_scoring/widgets/scoring/live_advice_card.dart';
+import 'package:soft_tennis_scoring/widgets/scoring/game_report_card.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/point_detail_dialog.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/score_table_cells.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/scoring_sheet_table.dart';
@@ -48,8 +47,8 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
   /// チーム1として扱います（統計まわりの既存の挙動に合わせています）。
   String _myTeam = 'team1';
 
-  /// いま表示している試合中アドバイス（未表示のときnull）
-  LiveCoachMessage? _liveAdvice;
+  /// いま表示しているゲームごとの振り返り（未表示のときnull）
+  GameReportMessage? _gameReport;
 
   @override
   void initState() {
@@ -239,29 +238,36 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     );
   }
 
-  /// 試合中アドバイスを取り直す
+  /// ゲームが終わったところで、ここまでの傾向を取り直す
   ///
   /// 生成に数秒かかることがあるため、**待たずに**進めます。入力が止まると
   /// 採点票として使い物にならないためです。間に合ったぶんだけ画面に出します。
-  void _refreshLiveAdvice() {
+  void _refreshGameReport() {
     final match = _match;
     if (match == null || _isMatchCompleted) return;
 
-    final input = LiveCoachInput(
-      match: match,
-      gameScores: _gameScores,
-      pointDetails: _pointDetails,
-      myTeam: _myTeam,
-      detailMode: _detailMode,
+    final stats = AdvancedPointStats()
+      ..addMatch(
+        myTeam: _myTeam,
+        points: _pointDetails,
+        gameScores: _gameScores,
+        gameCount: match.gameCount,
+      );
+
+    final report = PairReport.build(
+      stats,
+      playerNames: _myTeam == 'team1'
+          ? [match.team1Player1, match.team1Player2]
+          : [match.team2Player1, match.team2Player2],
     );
 
-    LiveCoachService.advise(input).then((update) {
-      if (!mounted || update.keepCurrent) return;
-      // 出す助言がなくなったときは消す（古い助言が残り続けないように）
-      setState(() => _liveAdvice = update.message);
+    LiveCoachService.report(report).then((message) {
+      if (!mounted) return;
+      // 出せる材料が無くなったときは消す（古い内容が残らないように）
+      setState(() => _gameReport = message);
     }).catchError((Object e) {
-      // 助言が出せなくても採点の邪魔はしない
-      debugPrint('試合中アドバイスの取得に失敗: $e');
+      // 振り返りが出せなくても採点の邪魔はしない
+      debugPrint('ゲームごとの振り返りの取得に失敗: $e');
     });
   }
 
@@ -314,9 +320,9 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
       _isLoading = false;
     });
 
-    // 試合が終わったら助言は残さない（画面に古い助言が居座るため）
-    if (_isMatchCompleted && _liveAdvice != null) {
-      setState(() => _liveAdvice = null);
+    // 試合が終わったら振り返りカードは残さない（画面に居座るため）
+    if (_isMatchCompleted && _gameReport != null) {
+      setState(() => _gameReport = null);
     }
 
     await _resolveMyTeam();
@@ -745,11 +751,10 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
       await _loadMatchData();
     }
 
-    // 助言はゲームが終わったところでだけ出す。プレー中に読ませても頭に
-    // 入らないうえ、ポイントごとに文言が変わると気が散るため。
+    // 振り返りはゲームが終わったところでだけ出す。
     // 生成は待たない（採点の手を止めないため）。
     if (winner != null) {
-      _refreshLiveAdvice();
+      _refreshGameReport();
     }
   }
   
@@ -1313,11 +1318,11 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
             ),
             child: Column(
               children: [
-                // 試合中アドバイス（プレミアム限定・入力ボタンのすぐ上に出す）
-                if (_liveAdvice != null)
-                  LiveAdviceCard(
-                    message: _liveAdvice!,
-                    onDismiss: () => setState(() => _liveAdvice = null),
+                // ゲームごとの振り返り（プレミアム限定・入力ボタンのすぐ上に出す）
+                if (_gameReport != null)
+                  GameReportCard(
+                    message: _gameReport!,
+                    onDismiss: () => setState(() => _gameReport = null),
                   ),
                 // 分析+モードがONの場合、1stサーブ選択を表示
                 if (_detailMode) ...[

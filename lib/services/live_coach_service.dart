@@ -4,204 +4,122 @@ import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 
 import 'package:soft_tennis_scoring/config/ai_config.dart';
 import 'package:soft_tennis_scoring/config/local_ai_config.dart';
-import 'package:soft_tennis_scoring/services/live_coach_engine.dart';
 import 'package:soft_tennis_scoring/services/local_llm.dart';
+import 'package:soft_tennis_scoring/services/pair_report.dart';
 import 'package:soft_tennis_scoring/services/subscription_service.dart';
 
-/// 画面に出す試合中アドバイス
-class LiveCoachMessage {
-  /// 助言の種類（[LiveAdvice.key]と同じ）
-  final String key;
+/// 画面に出す、ここまでの傾向
+class GameReportMessage {
+  final PairReport report;
 
-  /// 見出し
-  final String headline;
-
-  /// 本文
-  final String text;
-
-  /// 端末内LLMで言い回しを作ったか（falseなら定型文）
+  /// 一言を端末内LLMで整えたか（AIバッジの出し分け）
   final bool phrasedByAi;
 
-  /// 得点側の傾向か（falseなら失点側）
-  final bool isGood;
-
-  const LiveCoachMessage({
-    required this.key,
-    required this.headline,
-    required this.text,
-    required this.phrasedByAi,
-    required this.isGood,
-  });
+  const GameReportMessage({required this.report, required this.phrasedByAi});
 }
 
-/// 助言を取り直した結果
-///
-/// 「出す助言がない」と「まだ出し直さない」は分けて扱う必要があります。
-/// 前者で表示を消さないと、状況が変わったのに古い助言が画面に残り続けます。
-class LiveCoachUpdate {
-  /// 新しく表示する助言（nullなら新しいものはない）
-  final LiveCoachMessage? message;
-
-  /// いま出ている助言をそのまま残すか
-  ///
-  /// 間隔を空けている最中はtrueです。falseのときは表示を消してください。
-  final bool keepCurrent;
-
-  const LiveCoachUpdate._(this.message, this.keepCurrent);
-
-  /// 新しい助言を出す
-  const LiveCoachUpdate.show(LiveCoachMessage message) : this._(message, false);
-
-  /// いまは出す助言がない（表示は消す）
-  const LiveCoachUpdate.none() : this._(null, false);
-
-  /// 表示はそのまま（出し直しの間隔を空けている最中）
-  const LiveCoachUpdate.unchanged() : this._(null, true);
-}
-
-/// 試合中アドバイスの取りまとめ役
+/// ゲームが終わるたびに出す振り返りの取りまとめ役
 ///
 /// 段取りは次のとおりです。
 ///
-/// 1. **何を言うかは [LiveCoachEngine] が決める**。数値の判断を小さなモデルに
-///    任せると、根拠のない助言が出ます。
-/// 2. 端末内LLMが使えるなら、選んだ助言の**言い回しだけ**作り直す。
+/// 1. **何を言うかは [PairReport] が決める**。数値の判断を小さなモデルに
+///    任せると、根拠のない話が出ます。
+/// 2. 端末内LLMが使えるなら、**一言だけ**言い回しを整える。
 ///    クラウドは使いません。体育館は電波が悪いことが多く、試合中に通信の
 ///    失敗を待たされるのが一番困るためです。費用もかかりません。
-/// 3. 失敗したら定型文をそのまま出す。利用者には何も起きません。
+/// 3. 失敗したらルールが作った文をそのまま出す。利用者には何も起きません。
 ///
 /// プレミアム限定です。
 class LiveCoachService {
   LiveCoachService._(); // インスタンス化を防ぐ
 
-  /// 最後に助言を出した時刻（出し過ぎを防ぐ）
-  static DateTime? _lastShownAt;
-
-  /// 最後に出した助言の種類
-  static String? _lastKey;
-
   /// LLMに与える役割の説明
   ///
   /// 「新しい情報を足さない」ことを最優先で指示します。1B級のモデルは
-  /// 放っておくと、渡していない数値やもっともらしい戦術を作り出します。
+  /// 放っておくと、渡していない数値やもっともらしい対策を作り出します。
   static const String _systemInstruction = 'あなたはソフトテニスの記録係です。'
       '渡された事実を、試合中の選手がひと目で読める日本語に整えます。'
       '与えられた事実以外は絶対に書かないでください。'
       '励ましや指示は書かないでください（「頑張りましょう」「意識しましょう」など）。'
       '出力は60文字以内で、前置きも記号も付けないでください。';
 
-  /// 生成した文章として受け付ける上限（これを超えたら定型文に戻す）
+  /// 生成した文章として受け付ける上限（これを超えたら元の文に戻す）
   static const int _maxTextLength = 120;
 
-  /// いま出すべき助言を求める（無いときはnull）
+  /// ゲームが終わったところで呼ぶ
   ///
-  /// [force] がtrueのときは間隔の制限を無視します（利用者が自分で
-  /// 「アドバイス」を押したとき用）。
-  static Future<LiveCoachUpdate> advise(
-    LiveCoachInput input, {
-    bool force = false,
-  }) async {
+  /// 出せるものが無ければnullを返します（呼び出し側は表示を消してください）。
+  static Future<GameReportMessage?> report(PairReport report) async {
     if (!await isEntitled()) {
-      debugPrint('試合中の気づき: 課金していないので出さない');
-      return const LiveCoachUpdate.none();
+      debugPrint('ゲームごとの振り返り: 課金していないので出さない');
+      return null;
+    }
+    if (!report.hasContent) {
+      debugPrint('ゲームごとの振り返り: 出せる材料がない');
+      return null;
     }
 
-    final advice = LiveCoachEngine.advise(input);
-    if (advice == null) {
-      // 出せない理由が「入力が足りない」のか他かは、ここの内訳で分かる
-      debugPrint('試合中の気づき: 該当なし'
-          '（ポイント${input.pointDetails.length}件 / 分析+${input.detailMode} / '
-          '自チーム${input.myTeam}）');
-      return const LiveCoachUpdate.none();
-    }
+    final phrased = await _phrase(report.summary);
+    debugPrint('ゲームごとの振り返り: ${report.summary}'
+        '${phrased == null ? '' : ' → $phrased'}');
 
-    if (!force && !_shouldShow(advice)) {
-      debugPrint('試合中の気づき: 間隔待ち（${advice.key}）');
-      return const LiveCoachUpdate.unchanged();
+    if (phrased == null) {
+      return GameReportMessage(report: report, phrasedByAi: false);
     }
-    debugPrint('試合中の気づき: ${advice.key} / ${advice.template}');
-    _lastShownAt = DateTime.now();
-    _lastKey = advice.key;
-
-    final phrased = await _phrase(advice);
-    return LiveCoachUpdate.show(LiveCoachMessage(
-      key: advice.key,
-      headline: advice.headline,
-      text: phrased ?? advice.template,
-      phrasedByAi: phrased != null,
-      isGood: advice.isGood,
-    ));
+    return GameReportMessage(
+      report: PairReport(players: report.players, summary: phrased),
+      phrasedByAi: true,
+    );
   }
 
   /// 試合画面を離れるときに呼ぶ
   ///
   /// 読み込んだモデルはメモリを大きく使うため、試合が終わったら解放します。
-  static Future<void> onLeaveMatch() async {
-    _lastShownAt = null;
-    _lastKey = null;
-    await LocalLlm.release();
-  }
+  static Future<void> onLeaveMatch() => LocalLlm.release();
 
-  /// 試合中アドバイスを使ってよい状態か（課金しているか）
+  /// 使ってよい状態か（課金しているか）
   ///
   /// 動作確認のときだけ、デバッグビルドに限り課金判定を飛ばせます。
+  /// リリースビルドでは [AiConfig.forcePremium] が立っていても無視されます。
   static Future<bool> isEntitled() async {
     if (kDebugMode && AiConfig.forcePremium) return true;
     return SubscriptionService.isSubscribed();
   }
 
-  /// 直前と同じ助言を出し続けたり、短い間隔で出し直したりしないか
-  static bool _shouldShow(LiveAdvice advice) {
-    final last = _lastShownAt;
-    if (last == null) return true;
-
-    final elapsed = DateTime.now().difference(last);
-    // 種類が変わったなら、状況が変わったということなのですぐ出す
-    if (advice.key != _lastKey) return true;
-    return elapsed >= LocalAiConfig.liveCooldown;
-  }
-
-  /// 端末内LLMで言い回しを整える（使えないときはnull）
-  static Future<String?> _phrase(LiveAdvice advice) async {
+  /// 一言を端末内LLMで整える（使えないときはnull）
+  static Future<String?> _phrase(String? summary) async {
+    if (summary == null) return null;
     if (!LocalAiConfig.isConfigured) return null;
 
     try {
       final generated = await LocalLlm.generate(
-        buildPrompt(advice),
+        buildPrompt(summary),
         systemInstruction: _systemInstruction,
         timeout: LocalAiConfig.liveTimeout,
         maxTokens: LocalAiConfig.liveMaxTokens,
       );
-      debugPrint('試合中の気づき: LLM出力=${generated ?? "(なし)"}');
+      debugPrint('ゲームごとの振り返り: LLM出力=${generated ?? "(なし)"}');
       return sanitize(generated);
     } catch (e) {
-      debugPrint('試合中アドバイスの言い換えに失敗: $e');
+      debugPrint('ゲームごとの振り返りの言い換えに失敗: $e');
       return null;
     }
   }
 
   /// LLMへ渡す本文を組み立てる
   ///
-  /// 渡すのは「選んだ事実」と「その根拠の数値」だけです。生のスタッツを
-  /// 全部渡すと、モデルが勝手に別の結論を出し始めます。
-  static String buildPrompt(LiveAdvice advice) {
-    final buffer = StringBuffer()
-      ..writeln('次の事実を、言い回しだけ整えてください。')
-      ..writeln('事実: ${advice.template}');
-    if (advice.facts.isNotEmpty) {
-      buffer.writeln('根拠:');
-      advice.facts.forEach((key, value) {
-        buffer.writeln('- $key: $value');
-      });
-    }
-    buffer.write('整えた文だけを出力してください。対策や励ましは書かないでください。');
-    return buffer.toString();
+  /// 渡すのは「ルールが選んだ一言」だけです。生のスタッツを全部渡すと、
+  /// モデルが勝手に別の結論を出し始めます。
+  static String buildPrompt(String summary) {
+    return '次の事実を、言い回しだけ整えてください。\n'
+        '事実: $summary\n'
+        '整えた文だけを出力してください。対策や励ましは書かないでください。';
   }
 
   /// 生成結果を表示に使ってよいか確かめる
   ///
   /// 小さなモデルは、前置き・箇条書き・英語・途中で切れた文を返すことが
-  /// あります。怪しいものは捨てて定型文に戻します。
+  /// あります。怪しいものは捨てて元の文に戻します。
   static String? sanitize(String? generated) {
     if (generated == null) return null;
 
@@ -219,11 +137,5 @@ class LiveCoachService {
     if (!RegExp(r'[ぁ-んァ-ヶ一-龠]').hasMatch(text)) return null;
 
     return text;
-  }
-
-  /// テスト用に内部状態を戻す
-  static void resetForTest() {
-    _lastShownAt = null;
-    _lastKey = null;
   }
 }
