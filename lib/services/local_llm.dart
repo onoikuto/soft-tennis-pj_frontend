@@ -42,6 +42,13 @@ class LocalLlm {
   /// 走っている間は新しい依頼を受けません（試合中は最新の助言だけが要る）。
   static bool _busy = false;
 
+  /// 端末に置いたファイルの読み込みを一度試したか
+  ///
+  /// ダウンロードと違って中身の転送は起きない（パスを覚えるだけ）ので、
+  /// 利用者にボタンを押させる意味がありません。失敗し続けても困るので、
+  /// 1回だけ自動で試します。
+  static bool _autoInstallTried = false;
+
   /// この端末で端末内推論を試せるか
   ///
   /// Web・デスクトップにもプラグイン自体は対応していますが、動作確認をして
@@ -58,7 +65,13 @@ class LocalLlm {
     try {
       await _ensureInitialized();
       // ファイルを直接読む構成では、参照を張った時点で使える状態になる
-      if (LocalAiConfig.usesLocalFile) return FlutterGemma.hasActiveModel();
+      if (LocalAiConfig.usesLocalFile) {
+        if (FlutterGemma.hasActiveModel()) return true;
+        if (_autoInstallTried) return false;
+        _autoInstallTried = true;
+        debugPrint('端末内LLM: 端末のファイルを自動で読み込みます');
+        return install();
+      }
       return FlutterGemma.isModelInstalled(LocalAiConfig.modelFileName);
     } catch (e) {
       debugPrint('端末内LLMの状態を確認できませんでした: $e');

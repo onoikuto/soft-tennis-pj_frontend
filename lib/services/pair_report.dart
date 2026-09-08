@@ -58,6 +58,9 @@ class PairReport {
     return PairReport(players: players, summary: _buildSummary(stats, players));
   }
 
+  /// 一言を出すのに必要な、ウィナーとミスの合計本数
+  static const int _minSummaryTotal = 6;
+
   static PlayerReport _buildPlayer(AdvancedPointStats stats, String name) {
     return PlayerReport(
       name: name,
@@ -102,34 +105,57 @@ class PairReport {
     return parts.isEmpty ? null : parts.join('');
   }
 
-  /// 一言（全体で一番本数の多い傾向を1行にする）
+  /// 一言（Good/Bad 行では分からないことだけを1行にする）
   ///
-  /// ここだけは「まとめ」なので解釈が入ります。だからこそ**候補は数字から
-  /// 機械的に選び**、LLMには言い回しを整えさせるだけにします。1.5B級に
-  /// 自由に書かせると、渡していない理由や対策を作り出します。
+  /// 選手ごとのGood/Badをそのまま言い直しても、読み手には何も増えません。
+  /// ここでは**得点と失点のどちらが上回っているか**という、行を並べただけでは
+  /// 見えない比較を出します。偏りが十分はっきりしているときだけ、
+  /// その中身にも触れます。
+  ///
+  /// 言えることが無いときはnullを返します。薄い一言を無理に出すくらいなら、
+  /// 何も出さないほうがよいためです。
   static String? _buildSummary(
     AdvancedPointStats stats,
     List<PlayerReport> players,
   ) {
-    final topError = AdvancedPointStats.topOf(stats.errorShots);
-    final topWinner = AdvancedPointStats.topOf(stats.winnerShots);
+    final winners = stats.winnerShotTotal;
+    final errors = stats.errorShotTotal;
+    // 合計が少ないうちは、差が出ても偶然と区別できない
+    if (winners + errors < _minSummaryTotal) return null;
 
-    // 失点のほうが直しどころなので先に見る
-    if (topError != null && stats.errorShotTotal >= 5) {
-      final player = _dominantPlayer(stats.playerErrorShots, topError.key);
-      final who = player == null ? '' : '$playerの';
-      return 'いま一番失点しているのは$who${ShotType.getDisplay(topError.key)}'
-          '（${topError.value}本）。';
+    final balance = 'ウィナー$winners本・ミス$errors本。';
+
+    // 差が小さいときは比較だけを言う（どちらが多いとは言わない）
+    if ((winners - errors).abs() < 2) return balance;
+
+    if (errors > winners) {
+      final detail = _concentration(stats.errorShots, stats.playerErrorShots);
+      return detail == null
+          ? '$balanceミスのほうが多い。'
+          : '$balanceミスのほうが多く、その中心は$detail。';
     }
 
-    if (topWinner != null && stats.winnerShotTotal >= 5) {
-      final player = _dominantPlayer(stats.playerWinnerShots, topWinner.key);
-      final who = player == null ? '' : '$playerの';
-      return 'いま一番取れているのは$who${ShotType.getDisplay(topWinner.key)}'
-          '（${topWinner.value}本）。';
-    }
+    final detail = _concentration(stats.winnerShots, stats.playerWinnerShots);
+    return detail == null
+        ? '$balance取れているほうが多い。'
+        : '$balance取れているほうが多く、その中心は$detail。';
+  }
 
-    return null;
+  /// 偏りがはっきりしているときだけ「（選手の）球種」を返す
+  ///
+  /// 3本未満、または全体の4割に満たないものは「中心」とは言えません。
+  static String? _concentration(
+    Map<String, int> shots,
+    Map<String, Map<String, int>> byPlayer,
+  ) {
+    final top = AdvancedPointStats.topOf(shots);
+    final total = _sum(shots);
+    if (top == null || top.value < 3) return null;
+    if (top.value * 10 < total * 4) return null;
+
+    final player = _dominantPlayer(byPlayer, top.key);
+    final label = ShotType.getDisplay(top.key);
+    return player == null ? '$label（${top.value}本）' : '$playerの$label（${top.value}本）';
   }
 
   /// その球種を打っているのが主にひとりなら、その選手名
