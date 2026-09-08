@@ -1,3 +1,4 @@
+import 'package:soft_tennis_scoring/models/point_detail.dart';
 import 'package:soft_tennis_scoring/services/advanced_stats.dart';
 
 /// 分析コメントの種類
@@ -86,6 +87,7 @@ class InsightEngine {
     _addServeReceiveInsights(input, insights);
     _addClutchInsights(input, insights);
     _addPointDetailInsights(input, insights);
+    _addShotInsights(input, insights);
     _addOpponentInsights(input, insights);
 
     if (insights.isEmpty) {
@@ -274,6 +276,104 @@ class InsightEngine {
       }
     }
   }
+
+  /// 球種・コース・ミスの種類に関するコメント
+  ///
+  /// どれも分析+の任意入力なので、**入力済みの本数だけ**を母数にします。
+  /// 入力をスキップしたぶんを0として扱うと、傾向が薄まって読めなくなります。
+  static void _addShotInsights(InsightInput input, List<Insight> insights) {
+    final stats = input.pointStats;
+    if (!input.hasPointDetails || stats == null) return;
+
+    // 決まっている球種
+    final winnerShot = AdvancedPointStats.topOf(stats.winnerShots);
+    if (winnerShot != null && stats.winnerShotTotal >= 10) {
+      final percent = (winnerShot.value / stats.winnerShotTotal * 100).round();
+      insights.add(Insight(
+        type: InsightType.good,
+        text: 'ウィナー${stats.winnerShotTotal}本のうち${winnerShot.value}本（$percent%）が'
+            '${ShotType.getDisplay(winnerShot.key)}です。',
+        priority: 55,
+      ));
+    }
+
+    // 崩れている球種
+    final errorShot = AdvancedPointStats.topOf(stats.errorShots);
+    if (errorShot != null && stats.errorShotTotal >= 10) {
+      final percent = (errorShot.value / stats.errorShotTotal * 100).round();
+      insights.add(Insight(
+        type: InsightType.warning,
+        text: 'ミス${stats.errorShotTotal}本のうち${errorShot.value}本（$percent%）が'
+            '${ShotType.getDisplay(errorShot.key)}です。',
+        priority: 75,
+      ));
+    }
+
+    // ネットかアウトか（直し方が逆になるので分けて出す）
+    final errorType = AdvancedPointStats.topOf(stats.errorTypes);
+    if (errorType != null && stats.errorTypeTotal >= 10) {
+      final percent = (errorType.value / stats.errorTypeTotal * 100).round();
+      if (percent >= 50) {
+        insights.add(Insight(
+          type: InsightType.warning,
+          text: 'ミスの内訳は${ErrorType.getDisplay(errorType.key)}が'
+              '${errorType.value}本（$percent%）で最多です。',
+          priority: 65,
+        ));
+      }
+    }
+
+    // 得点しやすい展開・失点しやすい展開
+    final winnerCourse = AdvancedPointStats.topOf(stats.winnerCourses);
+    if (winnerCourse != null && _sum(stats.winnerCourses) >= 10) {
+      insights.add(Insight(
+        type: InsightType.good,
+        text: '${CourseType.getDisplay(winnerCourse.key)}展開での得点が'
+            '${winnerCourse.value}本と最も多いです。',
+        priority: 50,
+      ));
+    }
+
+    final errorCourse = AdvancedPointStats.topOf(stats.errorCourses);
+    if (errorCourse != null && _sum(stats.errorCourses) >= 10) {
+      insights.add(Insight(
+        type: InsightType.warning,
+        text: '${CourseType.getDisplay(errorCourse.key)}展開での失点が'
+            '${errorCourse.value}本と最も多いです。',
+        priority: 60,
+      ));
+    }
+
+    // 選手別（ダブルスなので、どちらの傾向かが分かると打ち手が変わる）
+    final topErrorPlayer = AdvancedPointStats.topOf(stats.playerErrors);
+    final errorPlayerTotal = _sum(stats.playerErrors);
+    if (topErrorPlayer != null &&
+        errorPlayerTotal >= 12 &&
+        topErrorPlayer.value * 3 >= errorPlayerTotal * 2) {
+      insights.add(Insight(
+        type: InsightType.info,
+        text: 'ミス$errorPlayerTotal本のうち${topErrorPlayer.value}本が'
+            '${topErrorPlayer.key}選手のものです。',
+        priority: 45,
+      ));
+    }
+
+    final topWinnerPlayer = AdvancedPointStats.topOf(stats.playerWinners);
+    final winnerPlayerTotal = _sum(stats.playerWinners);
+    if (topWinnerPlayer != null &&
+        winnerPlayerTotal >= 12 &&
+        topWinnerPlayer.value * 3 >= winnerPlayerTotal * 2) {
+      insights.add(Insight(
+        type: InsightType.info,
+        text: 'ウィナー$winnerPlayerTotal本のうち${topWinnerPlayer.value}本が'
+            '${topWinnerPlayer.key}選手のものです。',
+        priority: 35,
+      ));
+    }
+  }
+
+  static int _sum(Map<String, int> counts) =>
+      counts.values.fold(0, (a, b) => a + b);
 
   /// 対戦相手に関するコメント
   static void _addOpponentInsights(InsightInput input, List<Insight> insights) {

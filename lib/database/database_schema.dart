@@ -176,6 +176,7 @@ class DatabaseSchema {
         action_player TEXT,
         error_type TEXT,
         shot_type TEXT,
+        course_type TEXT,
         created_at TEXT NOT NULL,
         FOREIGN KEY (match_id) REFERENCES matches (id) ON DELETE CASCADE
       )
@@ -340,6 +341,11 @@ class DatabaseSchema {
       // バージョン8から9へのマイグレーション
       // ショットの種類（フォアハンド/バックハンド/ボレー等）カラムを追加
       await _addColumnIfNotExists(db, 'point_details', 'shot_type', 'TEXT');
+    }
+    if (oldVersion < 10) {
+      // バージョン9から10へのマイグレーション
+      // 打球のコース（左ストレート/右ストレート/クロス/逆クロス）カラムを追加
+      await _addColumnIfNotExists(db, 'point_details', 'course_type', 'TEXT');
     }
     // 将来のバージョンアップグレード処理をここに追加
   }

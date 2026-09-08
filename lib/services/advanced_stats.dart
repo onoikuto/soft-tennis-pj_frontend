@@ -138,6 +138,34 @@ class AdvancedPointStats {
   int gamePointTotal = 0;
   int gamePointWon = 0;
 
+  // --------------------------------------------------------------------------
+  // 球種・コース・ミスの種類の内訳
+  //
+  // どれも分析+の任意入力なので、未入力は数えません（母数にも入れません）。
+  // 未入力を0として扱うと、入力した人としない人で傾向が混ざります。
+  // --------------------------------------------------------------------------
+
+  /// ウィナーの球種別本数
+  final Map<String, int> winnerShots = {};
+
+  /// ウィナーのコース別本数
+  final Map<String, int> winnerCourses = {};
+
+  /// 自分たちのミスによる失点の球種別本数
+  final Map<String, int> errorShots = {};
+
+  /// 自分たちのミスによる失点のコース別本数
+  final Map<String, int> errorCourses = {};
+
+  /// ミスの種類別本数（ネット/アウト/ダブルフォルト）
+  final Map<String, int> errorTypes = {};
+
+  /// 選手別のウィナー本数
+  final Map<String, int> playerWinners = {};
+
+  /// 選手別のミス本数
+  final Map<String, int> playerErrors = {};
+
   double get firstServePointRate =>
       firstServePointTotal == 0 ? 0.0 : firstServePointWon / firstServePointTotal * 100;
   double get secondServePointRate =>
@@ -151,11 +179,40 @@ class AdvancedPointStats {
   double get lossStreak3PerMatch =>
       matchCount == 0 ? 0.0 : lossStreak3Count / matchCount;
 
+  /// 入力済みのウィナー本数（球種が入っているもの）
+  int get winnerShotTotal => _sum(winnerShots);
+
+  /// 入力済みのミス本数（球種が入っているもの）
+  int get errorShotTotal => _sum(errorShots);
+
+  /// 入力済みのミス本数（種類が入っているもの）
+  int get errorTypeTotal => _sum(errorTypes);
+
+  static int _sum(Map<String, int> counts) =>
+      counts.values.fold(0, (a, b) => a + b);
+
+  /// 一番多かった項目（同数のときは名前順で安定させる。空ならnull）
+  static MapEntry<String, int>? topOf(Map<String, int> counts) {
+    MapEntry<String, int>? best;
+    final keys = counts.keys.toList()..sort();
+    for (final key in keys) {
+      final count = counts[key]!;
+      if (best == null || count > best.value) best = MapEntry(key, count);
+    }
+    return best;
+  }
+
   /// 選手別サーブ統計（サンプル数の多い順）
   List<PlayerServeStat> get serverStatsList {
     final list = serverStats.values.toList()
       ..sort((a, b) => b.total.compareTo(a.total));
     return list;
+  }
+
+  /// 未入力（null・空文字）を除いて1つ数える
+  static void _bump(Map<String, int> counts, String? key) {
+    if (key == null || key.isEmpty) return;
+    counts[key] = (counts[key] ?? 0) + 1;
   }
 
   /// 1試合分のポイント詳細を集計に追加
@@ -215,6 +272,18 @@ class AdvancedPointStats {
             stat.total++;
             if (won) stat.won++;
           }
+        }
+
+        // 球種・コース・ミスの種類（分析+の任意入力。未入力は数えない）
+        if (won && (point.pointType == PointType.winner || point.pointType == 'ace')) {
+          _bump(winnerShots, point.shotType);
+          _bump(winnerCourses, point.courseType);
+          _bump(playerWinners, point.actionPlayer);
+        } else if (!won && point.pointType == PointType.opponentError) {
+          _bump(errorShots, point.shotType);
+          _bump(errorCourses, point.courseType);
+          _bump(errorTypes, point.errorType);
+          _bump(playerErrors, point.actionPlayer);
         }
 
         // 失点直後のポイント（同一ゲーム内）

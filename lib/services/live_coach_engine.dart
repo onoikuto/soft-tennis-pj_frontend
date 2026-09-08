@@ -1,18 +1,17 @@
 import 'package:soft_tennis_scoring/models/game_score.dart';
 import 'package:soft_tennis_scoring/models/match.dart';
 import 'package:soft_tennis_scoring/models/point_detail.dart';
-import 'package:soft_tennis_scoring/utils/game_rules.dart';
 
-/// 試合中のアドバイス1件
+/// 試合中に出す気づき1件
 ///
 /// [template] は「そのまま画面に出せる文章」です。端末内LLMが使えるときは
 /// [facts] を渡して言い回しだけ作り直しますが、失敗しても [template] が
 /// 出るので、利用者には何も起きません。
 class LiveAdvice {
-  /// 助言の種類を表すキー（テストとログで使う）
+  /// 種類を表すキー（テストとログで使う）
   final String key;
 
-  /// 見出し（10文字程度。試合中はここだけ見れば分かるようにする）
+  /// 見出し（試合中はここだけ見れば分かるようにする）
   final String headline;
 
   /// 定型文（LLMが使えないときはこれをそのまま表示する）
@@ -21,9 +20,12 @@ class LiveAdvice {
   /// 表示優先度（大きいほど先）
   final int priority;
 
+  /// 得点側の傾向か（falseなら失点側）
+  final bool isGood;
+
   /// LLMに渡す根拠となる数値
   ///
-  /// **ここに入れた値だけ**をLLMに渡します。数値の判断はルール側で終わって
+  /// **ここに入れた値だけ**をLLMに渡します。何を言うかはルール側で決め切って
   /// いるので、LLMには言い回しを整えてもらうだけです。
   final Map<String, String> facts;
 
@@ -32,11 +34,12 @@ class LiveAdvice {
     required this.headline,
     required this.template,
     required this.priority,
+    required this.isGood,
     this.facts = const {},
   });
 }
 
-/// 試合中アドバイスの入力データ
+/// 試合中の気づきの入力データ
 class LiveCoachInput {
   final Match match;
 
@@ -53,7 +56,8 @@ class LiveCoachInput {
   ///
   /// 詳細モードがOFFのとき [PointDetail.pointType] は既定値の
   /// `opponent_error` が入るだけで、実際の内容ではありません。
-  /// ミスやウィナーを見る判定は、このフラグが立っているときだけ行います。
+  /// 球種・コース・ミスの種類を見る判定は、このフラグが立っているときだけ
+  /// 行います。
   final bool detailMode;
 
   const LiveCoachInput({
@@ -67,32 +71,47 @@ class LiveCoachInput {
   String get opponentTeam => myTeam == 'team1' ? 'team2' : 'team1';
 }
 
-/// 試合の進行中に、いま出すべき助言をルールで選ぶエンジン
+/// 試合中に、記録から読み取れる傾向を選ぶエンジン
 ///
-/// LLMは使いません。**何を言うかはここで決め切ります。** 小さなモデルに
-/// 数値の判断まで任せると、根拠のない助言が出てしまうためです。
-/// LLMの役割は、ここで選んだ助言の言い回しを整えることだけです。
+/// **事実の指摘だけを出します。** 「取り切りましょう」「耐えましょう」の類は
+/// 記録が無くても言える精神論で、記録アプリの価値になりません。ここが返すのは
+/// 「何で・どれだけ・どの展開で」得点/失点したかだけです。対策はコーチと
+/// 選手が決めることです。
 ///
-/// サンプル数が少ない指標では助言を出しません（1本外しただけで
-/// 「サーブが不調です」と言われても困るため）。
+/// LLMは使いません。何を言うかはここで決め切ります。LLMの役割は、ここで
+/// 選んだ内容の言い回しを整えることだけです。
+///
+/// 入力数が少ない指標では何も言いません（2本外しただけで「バックが崩れて
+/// います」と言われても困るため）。
 class LiveCoachEngine {
   LiveCoachEngine._(); // インスタンス化を防ぐ
 
-  /// いま出すべき助言を1件返す（何もないときはnull）
+  /// 球種の偏りを指摘するのに必要な、入力済みの最少本数
+  static const int _minShots = 4;
+
+  /// コースの偏りを指摘するのに必要な、入力済みの最少本数
+  static const int _minCourses = 4;
+
+  /// ミスの種類の偏りを指摘するのに必要な、入力済みの最少本数
+  static const int _minErrorTypes = 6;
+
+  /// 1stサーブ成功率を出すのに必要な最少本数
+  static const int _minServes = 6;
+
+  /// いま出すべき気づきを1件返す（何もないときはnull）
   static LiveAdvice? advise(LiveCoachInput input) {
     final all = evaluate(input);
     return all.isEmpty ? null : all.first;
   }
 
-  /// 当てはまる助言を優先度順にすべて返す（テスト用）
+  /// 当てはまる気づきを優先度順にすべて返す（テスト用）
   static List<LiveAdvice> evaluate(LiveCoachInput input) {
     final advices = <LiveAdvice>[];
 
-    _addStreakAdvice(input, advices);
-    _addServeAdvice(input, advices);
-    _addPointTypeAdvice(input, advices);
-    _addShotAdvice(input, advices);
-    _addGameBreakAdvice(input, advices);
+    _addConcedingPattern(input, advices);
+    _addScoringPattern(input, advices);
+    _addErrorTypeRatio(input, advices);
+    _addFirstServeRate(input, advices);
 
     advices.sort((a, b) => b.priority.compareTo(a.priority));
     return advices;
@@ -102,271 +121,186 @@ class LiveCoachEngine {
   // 個別のルール
   // ============================================================================
 
-  /// 連続失点への助言
+  /// 失点の傾向（何の球で、どのコースで落としているか）
   ///
-  /// 試合中に一番効くのは「流れが相手に行っていることに気づかせる」ことなので、
-  /// 最優先で出します。
-  static void _addStreakAdvice(LiveCoachInput input, List<LiveAdvice> out) {
-    final streak = _currentLossStreak(input);
-    if (streak < 3) return;
-
-    out.add(LiveAdvice(
-      key: 'loss_streak',
-      headline: '流れを切る',
-      template: '$streak本連続で失点しています。一度呼吸を整えて、'
-          '次の1本は確実に返すことだけを考えましょう。',
-      priority: 100,
-      facts: {'連続失点': '$streak本'},
-    ));
-  }
-
-  /// 1stサーブの成功率への助言
-  static void _addServeAdvice(LiveCoachInput input, List<LiveAdvice> out) {
-    final serves = input.pointDetails
-        .where((p) => p.serverTeam == input.myTeam)
-        .toList();
-    // 4本未満では、たまたま外しただけと区別できない
-    if (serves.length < 4) return;
-
-    final inCount = serves.where((p) => p.firstServeIn).length;
-    final rate = inCount / serves.length;
-    final percent = (rate * 100).round();
-
-    if (rate < 0.5) {
-      out.add(LiveAdvice(
-        key: 'first_serve_low',
-        headline: '1stを入れる',
-        template: '1stサーブの確率が$percent%です。'
-            'スピードを少し落として、入れることを優先しましょう。',
-        priority: 80,
-        facts: {'1stサーブ成功率': '$percent%', '本数': '${serves.length}本'},
-      ));
-      return;
-    }
-
-    // サーブは入っているのにポイントが取れていない場合
-    final serveWon = serves.where((p) => p.pointWinner == input.myTeam).length;
-    final serveWinRate = serveWon / serves.length;
-    if (serves.length >= 6 && serveWinRate < 0.4) {
-      out.add(LiveAdvice(
-        key: 'serve_game_weak',
-        headline: 'サーブ後を作る',
-        template: 'サーブ側で取れているのが${(serveWinRate * 100).round()}%です。'
-            'サーブのあとの1本目をどこに集めるか、ペアで決めてから入りましょう。',
-        priority: 60,
-        facts: {
-          'サーブ側ポイント取得率': '${(serveWinRate * 100).round()}%',
-          '本数': '${serves.length}本',
-        },
-      ));
-    }
-  }
-
-  /// ウィナー・ミスの内訳への助言
-  ///
-  /// 詳細入力モードでないと中身が入らないため、そのときだけ見ます。
-  static void _addPointTypeAdvice(LiveCoachInput input, List<LiveAdvice> out) {
-    if (!input.detailMode) return;
-
-    final lost = input.pointDetails
-        .where((p) => p.pointWinner == input.opponentTeam)
-        .toList();
-    // 10本未満だと内訳の偏りが読めない
-    if (lost.length < 10) return;
-
-    // 相手から見た「相手のミス」＝こちらのミスによる失点
-    final ownErrors =
-        lost.where((p) => p.pointType == PointType.opponentError).length;
-    final rate = ownErrors / lost.length;
-    if (rate >= 0.6) {
-      out.add(LiveAdvice(
-        key: 'own_error_high',
-        headline: 'ミスを減らす',
-        template: '失点の${(rate * 100).round()}%が自分たちのミスです。'
-            '無理に決めにいかず、1本多く返すことを意識しましょう。',
-        priority: 70,
-        facts: {
-          '自分たちのミスによる失点': '$ownErrors本',
-          '失点': '${lost.length}本',
-        },
-      ));
-    }
-  }
-
-  /// 球種・ミスの種類からの助言
-  ///
-  /// 詳細入力モードで、かつ選手が入力をスキップしなかったぶんだけ見ます
-  /// （どちらも任意入力なので、未入力を「無かったこと」と数えないよう
-  /// 入力済みの件数を母数にします）。
-  static void _addShotAdvice(LiveCoachInput input, List<LiveAdvice> out) {
+  /// 直したいのは失点なので、得点の傾向より先に出します。
+  static void _addConcedingPattern(LiveCoachInput input, List<LiveAdvice> out) {
     if (!input.detailMode) return;
 
     // 自分たちのミスによる失点
-    final ownErrors = input.pointDetails
+    final lost = input.pointDetails
         .where((p) =>
             p.pointWinner == input.opponentTeam &&
             p.pointType == PointType.opponentError)
         .toList();
 
-    // どの球種で崩れているか
-    final shots = _countBy(ownErrors, (p) => p.shotType);
-    final topShot = _mostCommon(shots);
-    // 入力済み8本以上・その球種が半分以上でないと、偏りとは言えない
-    if (topShot != null && shots.total >= 8 && topShot.count * 2 >= shots.total) {
-      final label = ShotType.getDisplay(topShot.key);
-      out.add(LiveAdvice(
-        key: 'error_shot_concentrated',
-        headline: '$labelを整える',
-        template: 'ミスの${topShot.count}本が$labelです。'
-            'この球はいったん確実に返すことを優先しましょう。',
-        priority: 75,
-        facts: {
-          '崩れている球種': label,
-          'その球種でのミス': '${topShot.count}本',
-          '入力済みのミス': '${shots.total}本',
-        },
-      ));
-    }
-
-    // ネットかアウトか（直し方が逆になるので分けて言う）
-    final errorTypes = _countBy(ownErrors, (p) => p.errorType);
-    final topError = _mostCommon(errorTypes);
-    if (topError != null &&
-        errorTypes.total >= 8 &&
-        topError.count * 5 >= errorTypes.total * 3) {
-      final advice = switch (topError.key) {
-        ErrorType.net => '軌道を少し上げて、ネットの上を通す幅を作りましょう。',
-        ErrorType.out => '振り切らず、回転をかけて中に収めましょう。',
-        _ => '2ndサーブは確実さを優先しましょう。',
-      };
-      final label = ErrorType.getDisplay(topError.key);
-      out.add(LiveAdvice(
-        key: 'error_type_concentrated',
-        headline: '$labelが多い',
-        template: 'ミスの${topError.count}本が$labelです。$advice',
-        priority: 72,
-        facts: {
-          '多いミス': label,
-          'その本数': '${topError.count}本',
-          '入力済みのミス': '${errorTypes.total}本',
-        },
-      ));
-    }
-
-    // 決まっている球種（伸ばすところも言う）
-    final winners = input.pointDetails
-        .where((p) =>
-            p.pointWinner == input.myTeam && p.pointType == PointType.winner)
-        .toList();
-    final winnerShots = _countBy(winners, (p) => p.shotType);
-    final topWinner = _mostCommon(winnerShots);
-    if (topWinner != null &&
-        winnerShots.total >= 5 &&
-        topWinner.count * 2 >= winnerShots.total) {
-      final label = ShotType.getDisplay(topWinner.key);
-      out.add(LiveAdvice(
-        key: 'winner_shot_strength',
-        headline: '$labelが効いている',
-        template: '$labelで${topWinner.count}本決まっています。'
-            'この形に持ち込む組み立てを続けましょう。',
-        priority: 25,
-        facts: {
-          '決まっている球種': label,
-          'その球種でのウィナー': '${topWinner.count}本',
-        },
-      ));
-    }
+    final advice = _buildPattern(
+      points: lost,
+      key: 'conceding_pattern',
+      isGood: false,
+      shotWord: '失点',
+      courseWord: '失点しやすい',
+      priority: 80,
+    );
+    if (advice != null) out.add(advice);
   }
 
-  /// ゲームの区切りでの、ゲームカウントに応じた助言
+  /// 得点の傾向（何の球で、どのコースで取れているか）
+  static void _addScoringPattern(LiveCoachInput input, List<LiveAdvice> out) {
+    if (!input.detailMode) return;
+
+    final won = input.pointDetails
+        .where((p) =>
+            p.pointWinner == input.myTeam &&
+            (p.pointType == PointType.winner || p.pointType == 'ace'))
+        .toList();
+
+    final advice = _buildPattern(
+      points: won,
+      key: 'scoring_pattern',
+      isGood: true,
+      shotWord: '得点',
+      courseWord: '得点しやすい',
+      priority: 70,
+    );
+    if (advice != null) out.add(advice);
+  }
+
+  /// 球種とコースの偏りから1件を組み立てる
   ///
-  /// 助言はゲームが終わったところで出します。プレー中に読ませても頭に
-  /// 入らないうえ、ポイントごとに文言が変わると気が散るためです。
-  /// したがって進行中のゲームは無く、見るのは**ゲームカウント**になります。
-  static void _addGameBreakAdvice(LiveCoachInput input, List<LiveAdvice> out) {
-    var myGames = 0;
-    var theirGames = 0;
-    for (final score in input.gameScores) {
-      if (score.winner == null) continue;
-      if (score.winner == input.myTeam) {
-        myGames++;
-      } else {
-        theirGames++;
-      }
-    }
-    if (myGames + theirGames == 0) return;
+  /// 「スマッシュで5得点。クロス展開で得点しやすい。」のように、
+  /// 何の球かと、どの展開かを続けて言います。片方しか入力されていなければ、
+  /// 入力されている側だけを言います。
+  ///
+  /// ダブルスなので、その球種の過半をひとりが占めていれば選手名も添えます。
+  static LiveAdvice? _buildPattern({
+    required List<PointDetail> points,
+    required String key,
+    required bool isGood,
+    required String shotWord,
+    required String courseWord,
+    required int priority,
+  }) {
+    final shots = _countBy(points, (p) => p.shotType);
+    final topShot = _mostCommon(shots);
+    final courses = _countBy(points, (p) => p.courseType);
+    final topCourse = _mostCommon(courses);
 
-    final required = GameRules.requiredGamesToWin(input.match.gameCount);
-    final count = '$myGames-$theirGames';
+    final hasShot = topShot != null && shots.total >= _minShots;
+    final hasCourse = topCourse != null && courses.total >= _minCourses;
+    if (!hasShot && !hasCourse) return null;
 
-    // 次がファイナルゲーム（あと1ゲームずつで決まる並び）
-    if (myGames == required - 1 && theirGames == required - 1) {
-      out.add(LiveAdvice(
-        key: 'before_final_game',
-        headline: '次がファイナル',
-        template: '$countで次がファイナルゲームです。'
-            '守りに入らず、ここまで取れていた形をもう一度やりましょう。',
-        priority: 90,
-        facts: {'ゲームカウント': count},
-      ));
-      return;
-    }
+    final sentences = <String>[];
+    final facts = <String, String>{};
+    var headline = '';
 
-    // 相手にあと1ゲームで取られる
-    if (theirGames == required - 1) {
-      out.add(LiveAdvice(
-        key: 'facing_match_game',
-        headline: '後がない',
-        template: '$countで、次を落とすと負けです。'
-            '思い切って攻めるより、確実に1本返して長く続けましょう。',
-        priority: 65,
-        facts: {'ゲームカウント': count},
-      ));
-      return;
+    if (hasShot) {
+      final shotLabel = ShotType.getDisplay(topShot.key);
+      // その球種を打ったのが主にひとりなら、選手名まで言う
+      final player = _dominantPlayer(
+        points.where((p) => p.shotType == topShot.key).toList(),
+      );
+      final subject = player == null ? '' : '$playerは';
+      sentences.add('$subject$shotLabelで${topShot.count}$shotWord。');
+      headline = shotLabel;
+      facts['球種'] = shotLabel;
+      facts[shotWord] = '${topShot.count}本';
+      facts['入力済みの本数'] = '${shots.total}本';
+      if (player != null) facts['主に打った選手'] = player;
     }
 
-    // あと1ゲームで勝てる
-    if (myGames == required - 1) {
-      out.add(LiveAdvice(
-        key: 'game_to_win',
-        headline: 'あと1ゲーム',
-        template: '$countで、次を取れば勝ちです。'
-            '新しいことは試さず、いつもどおりのサーブとコースで取り切りましょう。',
-        priority: 55,
-        facts: {'ゲームカウント': count},
-      ));
-      return;
+    if (hasCourse) {
+      final courseLabel = CourseType.getDisplay(topCourse.key);
+      sentences.add('$courseLabel展開で$courseWord。');
+      if (headline.isEmpty) headline = courseLabel;
+      facts['コース'] = courseLabel;
+      facts['そのコースの本数'] = '${topCourse.count}本';
     }
 
-    // 2ゲーム以上離されている
-    if (theirGames - myGames >= 2) {
-      out.add(LiveAdvice(
-        key: 'behind',
-        headline: '立て直す',
-        template: '$countです。取り返そうと急がず、'
-            '次の1ゲームだけに集中しましょう。',
-        priority: 20,
-        facts: {'ゲームカウント': count},
-      ));
-      return;
-    }
+    return LiveAdvice(
+      key: key,
+      headline: headline,
+      template: sentences.join(''),
+      priority: priority,
+      isGood: isGood,
+      facts: facts,
+    );
+  }
 
-    // 2ゲーム以上リードしている
-    if (myGames - theirGames >= 2) {
-      out.add(LiveAdvice(
-        key: 'ahead',
-        headline: '緩めない',
-        template: '$countとリードしています。'
-            'ここで形を変えず、同じ入り方を続けましょう。',
-        priority: 15,
-        facts: {'ゲームカウント': count},
-      ));
-    }
+  /// ミスの種類の内訳（ネットかアウトか）
+  static void _addErrorTypeRatio(LiveCoachInput input, List<LiveAdvice> out) {
+    if (!input.detailMode) return;
+
+    final lost = input.pointDetails
+        .where((p) =>
+            p.pointWinner == input.opponentTeam &&
+            p.pointType == PointType.opponentError)
+        .toList();
+
+    final counts = _countBy(lost, (p) => p.errorType);
+    final top = _mostCommon(counts);
+    if (top == null || counts.total < _minErrorTypes) return;
+    // 半分以下なら偏っているとは言えない
+    if (top.count * 2 < counts.total) return;
+
+    final label = ErrorType.getDisplay(top.key);
+    out.add(LiveAdvice(
+      key: 'error_type_ratio',
+      headline: label,
+      template: 'ミス${counts.total}本のうち${top.count}本が$label。',
+      priority: 55,
+      isGood: false,
+      facts: {
+        'ミスの種類': label,
+        'その本数': '${top.count}本',
+        '入力済みのミス': '${counts.total}本',
+      },
+    ));
+  }
+
+  /// 1stサーブの成功率
+  ///
+  /// 詳細モードでなくても、メイン画面の1st選択から記録されています。
+  static void _addFirstServeRate(LiveCoachInput input, List<LiveAdvice> out) {
+    final serves = input.pointDetails
+        .where((p) => p.serverTeam == input.myTeam)
+        .toList();
+    if (serves.length < _minServes) return;
+
+    final inCount = serves.where((p) => p.firstServeIn).length;
+    final percent = (inCount / serves.length * 100).round();
+    // 十分入っているときにわざわざ言う必要はない
+    if (percent >= 60) return;
+
+    out.add(LiveAdvice(
+      key: 'first_serve_rate',
+      headline: '1stサーブ',
+      template: '1stサーブは${serves.length}本中$inCount本（$percent%）。',
+      priority: 40,
+      isGood: false,
+      facts: {
+        '1stサーブ成功率': '$percent%',
+        '入った本数': '$inCount本',
+        '打った本数': '${serves.length}本',
+      },
+    ));
   }
 
   // ============================================================================
   // 集計の補助
   // ============================================================================
+
+  /// その球を打ったのが主にひとりなら、その選手名を返す
+  ///
+  /// ダブルスなので、ペアのどちらの傾向なのかが分かると打ち手が変わります。
+  /// 過半を占めていないときは、名指しできないのでnullを返します。
+  static String? _dominantPlayer(List<PointDetail> points) {
+    final counts = _countBy(points, (p) => p.actionPlayer);
+    final top = _mostCommon(counts);
+    if (top == null || counts.total < 3) return null;
+    if (top.count * 2 <= counts.total) return null;
+    return top.key;
+  }
 
   /// 未入力を除いて数えた集計結果
   static _Counts _countBy(
@@ -394,16 +328,6 @@ class LiveCoachEngine {
       if (best == null || count > best.count) best = _Entry(key, count);
     }
     return best;
-  }
-
-  /// いま何本連続で失点しているか
-  static int _currentLossStreak(LiveCoachInput input) {
-    var streak = 0;
-    for (final point in input.pointDetails.reversed) {
-      if (point.pointWinner == input.myTeam) break;
-      streak++;
-    }
-    return streak;
   }
 }
 

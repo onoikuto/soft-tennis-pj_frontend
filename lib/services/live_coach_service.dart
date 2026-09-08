@@ -22,11 +22,15 @@ class LiveCoachMessage {
   /// 端末内LLMで言い回しを作ったか（falseなら定型文）
   final bool phrasedByAi;
 
+  /// 得点側の傾向か（falseなら失点側）
+  final bool isGood;
+
   const LiveCoachMessage({
     required this.key,
     required this.headline,
     required this.text,
     required this.phrasedByAi,
+    required this.isGood,
   });
 }
 
@@ -80,10 +84,11 @@ class LiveCoachService {
   ///
   /// 「新しい情報を足さない」ことを最優先で指示します。1B級のモデルは
   /// 放っておくと、渡していない数値やもっともらしい戦術を作り出します。
-  static const String _systemInstruction = 'あなたはソフトテニスのコーチです。'
-      '渡された助言を、試合中の選手がひと目で読める日本語に整えます。'
+  static const String _systemInstruction = 'あなたはソフトテニスの記録係です。'
+      '渡された事実を、試合中の選手がひと目で読める日本語に整えます。'
       '与えられた事実以外は絶対に書かないでください。'
-      '出力は60文字以内の1文だけで、前置きも記号も付けないでください。';
+      '励ましや指示は書かないでください（「頑張りましょう」「意識しましょう」など）。'
+      '出力は60文字以内で、前置きも記号も付けないでください。';
 
   /// 生成した文章として受け付ける上限（これを超えたら定型文に戻す）
   static const int _maxTextLength = 120;
@@ -111,6 +116,7 @@ class LiveCoachService {
       headline: advice.headline,
       text: phrased ?? advice.template,
       phrasedByAi: phrased != null,
+      isGood: advice.isGood,
     ));
   }
 
@@ -162,19 +168,19 @@ class LiveCoachService {
 
   /// LLMへ渡す本文を組み立てる
   ///
-  /// 渡すのは「選んだ助言」と「その根拠の数値」だけです。生のスタッツを
+  /// 渡すのは「選んだ事実」と「その根拠の数値」だけです。生のスタッツを
   /// 全部渡すと、モデルが勝手に別の結論を出し始めます。
   static String buildPrompt(LiveAdvice advice) {
     final buffer = StringBuffer()
-      ..writeln('次の助言を、言い回しだけ整えてください。')
-      ..writeln('助言: ${advice.template}');
+      ..writeln('次の事実を、言い回しだけ整えてください。')
+      ..writeln('事実: ${advice.template}');
     if (advice.facts.isNotEmpty) {
       buffer.writeln('根拠:');
       advice.facts.forEach((key, value) {
         buffer.writeln('- $key: $value');
       });
     }
-    buffer.write('整えた1文だけを出力してください。');
+    buffer.write('整えた文だけを出力してください。対策や励ましは書かないでください。');
     return buffer.toString();
   }
 

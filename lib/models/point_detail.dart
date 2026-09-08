@@ -50,9 +50,17 @@ class PointDetail {
   final String? errorType;
 
   /// ショットの種類（'forehand'=フォアハンド, 'backhand'=バックハンド,
-  /// 'volley'=ボレー, 'smash'=スマッシュ, 'lob'=ロブ, 'serve'=サーブ）
+  /// 'volley'=ボレー, 'smash'=スマッシュ, 'lob'=ロブ, 'twist'=ツイスト,
+  /// 'serve'=サーブ, 'receive'=レシーブ）
   /// ウィナー・ミスどちらでも使う（何のショットで決まった/崩れたか）。null: 未入力
   final String? shotType;
+
+  /// 打球のコース（'straight_left'=左ストレート, 'straight_right'=右ストレート,
+  /// 'cross'=クロス, 'reverse_cross'=逆クロス）
+  ///
+  /// 打った人から見た方向で記録します。陣形（雁行陣・ダブル前衛・ダブル後衛）に
+  /// 依存しないので、どの陣形でも同じ意味になります。null: 未入力
+  final String? courseType;
 
   /// 作成日時
   final DateTime createdAt;
@@ -70,6 +78,7 @@ class PointDetail {
     this.actionPlayer,
     this.errorType,
     this.shotType,
+    this.courseType,
     required this.createdAt,
   });
 
@@ -88,6 +97,7 @@ class PointDetail {
       'action_player': actionPlayer,
       'error_type': errorType,
       'shot_type': shotType,
+      'course_type': courseType,
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -107,6 +117,7 @@ class PointDetail {
       actionPlayer: map['action_player'] as String?,
       errorType: map['error_type'] as String?,
       shotType: map['shot_type'] as String?,
+      courseType: map['course_type'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
     );
   }
@@ -148,6 +159,7 @@ class PointDetail {
     String? actionPlayer,
     String? errorType,
     String? shotType,
+    String? courseType,
     DateTime? createdAt,
   }) {
     return PointDetail(
@@ -163,6 +175,7 @@ class PointDetail {
       actionPlayer: actionPlayer ?? this.actionPlayer,
       errorType: errorType ?? this.errorType,
       shotType: shotType ?? this.shotType,
+      courseType: courseType ?? this.courseType,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -235,10 +248,47 @@ class ShotType {
   static const String volley = 'volley';
   static const String smash = 'smash';
   static const String lob = 'lob';
+  static const String twist = 'twist';
   static const String serve = 'serve';
+  static const String receive = 'receive';
 
   /// 全てのショット種類
-  static const List<String> all = [forehand, backhand, volley, smash, lob, serve];
+  ///
+  /// サーブ・レシーブは同じ場面の表裏なので、入力画面では
+  /// サーブ側の選手なら「サーブ」、レシーブ側の選手なら「レシーブ」だけを
+  /// 出します（[servingSide] / [receivingSide] を使ってください）。
+  static const List<String> all = [
+    forehand,
+    backhand,
+    volley,
+    smash,
+    lob,
+    twist,
+    serve,
+    receive,
+  ];
+
+  /// サーブ側の選手に見せる選択肢
+  static const List<String> servingSide = [
+    forehand,
+    backhand,
+    volley,
+    smash,
+    lob,
+    twist,
+    serve,
+  ];
+
+  /// レシーブ側の選手に見せる選択肢
+  static const List<String> receivingSide = [
+    forehand,
+    backhand,
+    volley,
+    smash,
+    lob,
+    twist,
+    receive,
+  ];
 
   /// 日本語表示を取得
   static String getDisplay(String type) {
@@ -253,8 +303,47 @@ class ShotType {
         return 'スマッシュ';
       case lob:
         return 'ロブ';
+      case twist:
+        return 'ツイスト';
       case serve:
         return 'サーブ';
+      case receive:
+        return 'レシーブ';
+      default:
+        return type;
+    }
+  }
+}
+
+/// 打球のコースの定数
+///
+/// 打った人から見た方向で記録します。陣形（雁行陣・ダブル前衛・ダブル後衛）に
+/// 依存しないので、どの陣形でも同じ意味になります。
+class CourseType {
+  static const String straightLeft = 'straight_left';
+  static const String straightRight = 'straight_right';
+  static const String cross = 'cross';
+  static const String reverseCross = 'reverse_cross';
+
+  /// 全てのコース
+  static const List<String> all = [
+    straightLeft,
+    straightRight,
+    cross,
+    reverseCross,
+  ];
+
+  /// 日本語表示を取得
+  static String getDisplay(String type) {
+    switch (type) {
+      case straightLeft:
+        return '左ストレート';
+      case straightRight:
+        return '右ストレート';
+      case cross:
+        return 'クロス';
+      case reverseCross:
+        return '逆クロス';
       default:
         return type;
     }

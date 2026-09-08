@@ -64,6 +64,17 @@ class _PointDetailDialogState extends State<PointDetailDialog> {
     }
   }
 
+  /// ショットを打った側のチーム
+  ///
+  /// ウィナーなら得点した側、ミスなら失点した側の選手が打っています。
+  /// サーブ側かレシーブ側かで、見せる球種の選択肢が変わります。
+  String _actingTeam(String pointType) {
+    if (pointType == PointType.opponentError) {
+      return widget.pointWinner == 'team1' ? 'team2' : 'team1';
+    }
+    return widget.pointWinner;
+  }
+
   Future<void> _selectAndSave(String pointType, String actionPlayer) async {
     String? errorType;
     if (pointType == PointType.opponentError) {
@@ -73,7 +84,11 @@ class _PointDetailDialogState extends State<PointDetailDialog> {
     }
 
     // ウィナー・ミスどちらでも、何のショットだったかを聞く（スキップ可）
-    final shotType = await _pickShotType();
+    final shotType = await _pickShotType(_actingTeam(pointType));
+    if (!mounted) return;
+
+    // どのコースへ打った球だったかを聞く（スキップ可）
+    final courseType = await _pickCourseType();
     if (!mounted) return;
 
     final pointDetail = PointDetail(
@@ -88,6 +103,7 @@ class _PointDetailDialogState extends State<PointDetailDialog> {
       actionPlayer: actionPlayer,
       errorType: errorType,
       shotType: shotType,
+      courseType: courseType,
       createdAt: DateTime.now(),
     );
     if (!mounted) return;
@@ -132,7 +148,13 @@ class _PointDetailDialogState extends State<PointDetailDialog> {
   /// ショットの種類（フォアハンド・バックハンド・ボレー等）を選ばせる
   ///
   /// これも任意入力です。試合中の入力の手を止めたくないためです。
-  Future<String?> _pickShotType() {
+  ///
+  /// [actingTeam] がサーブ側なら「サーブ」、レシーブ側なら「レシーブ」を
+  /// 出します。同じ場面の表裏なので、両方を並べると選び間違えます。
+  Future<String?> _pickShotType(String actingTeam) {
+    final types = actingTeam == widget.serverTeam
+        ? ShotType.servingSide
+        : ShotType.receivingSide;
     return showDialog<String?>(
       context: context,
       builder: (ctx) => Dialog(
@@ -156,7 +178,7 @@ class _PointDetailDialogState extends State<PointDetailDialog> {
                 childAspectRatio: 2.6,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
-                  for (final type in ShotType.all)
+                  for (final type in types)
                     _choiceButton(ctx, ShotType.getDisplay(type), type),
                 ],
               ),
@@ -164,6 +186,54 @@ class _PointDetailDialogState extends State<PointDetailDialog> {
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(null),
                 child: const Text('スキップ', style: TextStyle(color: Color(0xFF999999))),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 打球のコースを選ばせる
+  ///
+  /// 打った人から見た方向です。陣形に依存しないので、雁行陣でも
+  /// ダブル前衛・ダブル後衛でも同じ意味になります。これも任意入力です。
+  Future<String?> _pickCourseType() {
+    return showDialog<String?>(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'コースは？',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF333333)),
+              ),
+              const SizedBox(height: 16),
+              GridView.count(
+                shrinkWrap: true,
+                crossAxisCount: 2,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 2.6,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  for (final type in CourseType.all)
+                    _choiceButton(ctx, CourseType.getDisplay(type), type),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(null),
+                child: const Text('スキップ',
+                    style: TextStyle(color: Color(0xFF999999))),
               ),
             ],
           ),

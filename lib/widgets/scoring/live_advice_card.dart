@@ -20,6 +20,10 @@ class LiveAdviceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 得点の傾向か失点の傾向かで、ひと目で分かるように色を変える
+    final accent =
+        message.isGood ? const Color(0xFF2E7D32) : const Color(0xFFB3261E);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
@@ -31,10 +35,12 @@ class LiveAdviceCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.tips_and_updates_outlined,
+          Icon(
+            message.isGood
+                ? Icons.trending_up
+                : Icons.report_problem_outlined,
             size: 18,
-            color: Color(0xFF1E293B),
+            color: accent,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -45,10 +51,10 @@ class LiveAdviceCard extends StatelessWidget {
                   children: [
                     Text(
                       message.headline,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF1E293B),
+                        color: accent,
                       ),
                     ),
                     if (message.phrasedByAi) ...[
