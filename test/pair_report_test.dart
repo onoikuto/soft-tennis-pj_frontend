@@ -200,6 +200,84 @@ void main() {
       }
     });
 
+    test('相手の弱点と警戒すべき球を出す', () {
+      final points = [
+        // 相手のミスで取れたポイント（相手の弱点）
+        for (var i = 1; i <= 4; i++)
+          _point(
+            pointNumber: i,
+            pointWinner: 'team1',
+            pointType: PointType.opponentError,
+            shotType: ShotType.backhand,
+            courseType: CourseType.reverseCross,
+            actionPlayer: '鈴木',
+          ),
+        // 相手に決められたポイント（警戒）
+        for (var i = 5; i <= 7; i++)
+          _point(
+            pointNumber: i,
+            pointWinner: 'team2',
+            pointType: PointType.winner,
+            shotType: ShotType.smash,
+            actionPlayer: '高橋',
+          ),
+      ];
+
+      final report =
+          PairReport.build(_stats(points), playerNames: ['山田', '佐藤']);
+
+      expect(report.opponent, isNotNull);
+      expect(report.opponent!.weakness,
+          '鈴木はバックハンドで4ミス。逆クロス展開でミスが出やすい。');
+      expect(report.opponent!.strength, '高橋はスマッシュで3得点。');
+    });
+
+    test('相手の材料がなければ相手の欄は出さない', () {
+      final points = [
+        for (var i = 1; i <= 3; i++)
+          _point(
+            pointNumber: i,
+            pointWinner: 'team2',
+            pointType: PointType.opponentError,
+            shotType: ShotType.backhand,
+            actionPlayer: '佐藤',
+          ),
+      ];
+
+      final report =
+          PairReport.build(_stats(points), playerNames: ['山田', '佐藤']);
+
+      expect(report.opponent, isNull);
+    });
+
+    test('自分がチーム2のときは相手＝チーム1になる', () {
+      final points = [
+        for (var i = 1; i <= 4; i++)
+          _point(
+            pointNumber: i,
+            pointWinner: 'team2',
+            pointType: PointType.opponentError,
+            shotType: ShotType.lob,
+            actionPlayer: '山田',
+          ),
+      ];
+
+      final stats = AdvancedPointStats()
+        ..addMatch(
+          myTeam: 'team2',
+          points: points,
+          gameScores: [
+            GameScore(
+                matchId: 1, gameNumber: 1, team1Score: 2, team2Score: 4)
+          ],
+          gameCount: 7,
+        );
+
+      final report = PairReport.build(stats, playerNames: ['鈴木', '高橋']);
+
+      expect(report.opponent!.weakness, contains('山田はロブで4ミス。'));
+    });
+
     test('本数が少なければ何も言わない', () {
       final points = [
         for (var i = 1; i <= 2; i++)

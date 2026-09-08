@@ -17,6 +17,19 @@ class PlayerReport {
   bool get hasContent => good != null || bad != null;
 }
 
+/// 相手ペアの傾向
+class OpponentReport {
+  /// 弱点（相手が崩れている球・展開）
+  final String? weakness;
+
+  /// 強み（相手が決めてきている球・展開）
+  final String? strength;
+
+  const OpponentReport({this.weakness, this.strength});
+
+  bool get hasContent => weakness != null || strength != null;
+}
+
 /// ペア2人分のまとめ
 ///
 /// 統計画面（複数試合の累計）と、試合が終わった直後（その1試合）の
@@ -28,10 +41,16 @@ class PairReport {
   /// 一言（全体で一番大きい傾向を1行で）
   final String? summary;
 
-  const PairReport({required this.players, this.summary});
+  /// 相手ペアの傾向（材料が足りなければnull）
+  final OpponentReport? opponent;
+
+  const PairReport({required this.players, this.summary, this.opponent});
 
   /// 表示するものがあるか
-  bool get hasContent => players.any((p) => p.hasContent) || summary != null;
+  bool get hasContent =>
+      players.any((p) => p.hasContent) ||
+      summary != null ||
+      (opponent?.hasContent ?? false);
 
   // ============================================================================
   // 組み立て
@@ -55,7 +74,11 @@ class PairReport {
       for (final name in names.take(2)) _buildPlayer(stats, name),
     ];
 
-    return PairReport(players: players, summary: _buildSummary(stats, players));
+    return PairReport(
+      players: players,
+      summary: _buildSummary(stats, players),
+      opponent: _buildOpponent(stats),
+    );
   }
 
   /// 一言を出すのに必要な、ウィナーとミスの合計本数
@@ -88,13 +111,16 @@ class PairReport {
     required Map<String, int>? courses,
     required String countWord,
     required String courseWord,
+    String? player,
   }) {
     const minCount = 3;
     final parts = <String>[];
 
     final topShot = shots == null ? null : AdvancedPointStats.topOf(shots);
     if (topShot != null && _sum(shots!) >= minCount) {
-      parts.add('${ShotType.getDisplay(topShot.key)}で${topShot.value}$countWord。');
+      final subject = player == null ? '' : '$playerは';
+      parts.add(
+          '$subject${ShotType.getDisplay(topShot.key)}で${topShot.value}$countWord。');
     }
 
     final topCourse = courses == null ? null : AdvancedPointStats.topOf(courses);
@@ -103,6 +129,36 @@ class PairReport {
     }
 
     return parts.isEmpty ? null : parts.join('');
+  }
+
+  /// 相手ペアの傾向
+  ///
+  /// 採点票は両チームぶんを記録しているので、相手が崩れている球・決めて
+  /// きている球もそのまま出せます。弱点のほうが打ち手に直結するので先です。
+  static OpponentReport? _buildOpponent(AdvancedPointStats stats) {
+    final weakness = _sentence(
+      shots: stats.opponentErrorShots,
+      courses: stats.opponentErrorCourses,
+      countWord: 'ミス',
+      courseWord: 'ミスが出やすい',
+      player: _dominantPlayer(
+        stats.opponentPlayerErrorShots,
+        AdvancedPointStats.topOf(stats.opponentErrorShots)?.key,
+      ),
+    );
+    final strength = _sentence(
+      shots: stats.opponentWinnerShots,
+      courses: stats.opponentWinnerCourses,
+      countWord: '得点',
+      courseWord: '決められやすい',
+      player: _dominantPlayer(
+        stats.opponentPlayerWinnerShots,
+        AdvancedPointStats.topOf(stats.opponentWinnerShots)?.key,
+      ),
+    );
+
+    if (weakness == null && strength == null) return null;
+    return OpponentReport(weakness: weakness, strength: strength);
   }
 
   /// 一言（Good/Bad 行では分からないことだけを1行にする）
@@ -161,8 +217,9 @@ class PairReport {
   /// その球種を打っているのが主にひとりなら、その選手名
   static String? _dominantPlayer(
     Map<String, Map<String, int>> byPlayer,
-    String shot,
+    String? shot,
   ) {
+    if (shot == null) return null;
     final counts = <String, int>{};
     byPlayer.forEach((player, shots) {
       final count = shots[shot];

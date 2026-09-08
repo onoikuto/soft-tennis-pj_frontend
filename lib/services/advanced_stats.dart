@@ -178,6 +178,31 @@ class AdvancedPointStats {
   /// 選手別・コース別のミス本数
   final Map<String, Map<String, int>> playerErrorCourses = {};
 
+  // --------------------------------------------------------------------------
+  // 相手側の内訳
+  //
+  // 採点票は両チームぶんを記録しているので、相手が決めた球・崩れた球も
+  // そのまま集計できます。相手の弱点を出すために使います。
+  // --------------------------------------------------------------------------
+
+  /// 相手のウィナーの球種別本数
+  final Map<String, int> opponentWinnerShots = {};
+
+  /// 相手のウィナーのコース別本数
+  final Map<String, int> opponentWinnerCourses = {};
+
+  /// 相手のミスの球種別本数
+  final Map<String, int> opponentErrorShots = {};
+
+  /// 相手のミスのコース別本数
+  final Map<String, int> opponentErrorCourses = {};
+
+  /// 相手選手別・球種別のウィナー本数
+  final Map<String, Map<String, int>> opponentPlayerWinnerShots = {};
+
+  /// 相手選手別・球種別のミス本数
+  final Map<String, Map<String, int>> opponentPlayerErrorShots = {};
+
   /// 記録に出てくる自チームの選手名（本数の多い順）
   List<String> get involvedPlayers {
     final totals = <String, int>{};
@@ -321,6 +346,19 @@ class AdvancedPointStats {
           _bump(playerErrors, point.actionPlayer);
           _bumpNested(playerErrorShots, point.actionPlayer, point.shotType);
           _bumpNested(playerErrorCourses, point.actionPlayer, point.courseType);
+        } else if (!won &&
+            (point.pointType == PointType.winner || point.pointType == 'ace')) {
+          // 相手が決めたポイント
+          _bump(opponentWinnerShots, point.shotType);
+          _bump(opponentWinnerCourses, point.courseType);
+          _bumpNested(
+              opponentPlayerWinnerShots, point.actionPlayer, point.shotType);
+        } else if (won && point.pointType == PointType.opponentError) {
+          // 相手のミスで取れたポイント
+          _bump(opponentErrorShots, point.shotType);
+          _bump(opponentErrorCourses, point.courseType);
+          _bumpNested(
+              opponentPlayerErrorShots, point.actionPlayer, point.shotType);
         }
 
         // 失点直後のポイント（同一ゲーム内）

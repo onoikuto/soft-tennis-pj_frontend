@@ -42,6 +42,14 @@ class PairReportView extends StatelessWidget {
               _line('Bad', player.bad!, const Color(0xFFB3261E)),
             const SizedBox(height: 12),
           ],
+        if (report.opponent?.hasContent ?? false) ...[
+          _sectionTitle('相手ペア'),
+          if (report.opponent!.weakness != null)
+            _line('弱点', report.opponent!.weakness!, const Color(0xFF2E7D32)),
+          if (report.opponent!.strength != null)
+            _line('警戒', report.opponent!.strength!, const Color(0xFFB3261E)),
+          const SizedBox(height: 12),
+        ],
         if (report.summary != null) ...[
           Row(
             children: [
