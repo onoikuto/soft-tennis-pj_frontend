@@ -16,10 +16,7 @@ void main() {
   });
 
   group('LiveCoachService.report', () {
-    test('課金していればルールの文言がそのまま返る（端末内LLMなしでも動く）',
-        () async {
-      SharedPreferences.setMockInitialValues({'flutter.is_subscribed': true});
-
+    test('ルールの文言がそのまま返る（端末内LLMなしでも動く）', () async {
       final message = await LiveCoachService.report(_report());
 
       expect(message, isNotNull);
@@ -27,15 +24,13 @@ void main() {
       expect(message.report.summary, contains('佐藤のバックハンド'));
     });
 
-    test('課金していなければ出さない', () async {
+    test('課金していなくても出す（課金対象は統計画面だけ）', () async {
       SharedPreferences.setMockInitialValues({'flutter.is_subscribed': false});
 
-      expect(await LiveCoachService.report(_report()), isNull);
+      expect(await LiveCoachService.report(_report()), isNotNull);
     });
 
     test('材料がなければ出さない', () async {
-      SharedPreferences.setMockInitialValues({'flutter.is_subscribed': true});
-
       const empty = PairReport(players: []);
       expect(await LiveCoachService.report(empty), isNull);
     });

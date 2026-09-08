@@ -1,12 +1,10 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
+import 'package:flutter/foundation.dart' show debugPrint;
 
-import 'package:soft_tennis_scoring/config/ai_config.dart';
 import 'package:soft_tennis_scoring/config/local_ai_config.dart';
 import 'package:soft_tennis_scoring/services/local_llm.dart';
 import 'package:soft_tennis_scoring/services/pair_report.dart';
-import 'package:soft_tennis_scoring/services/subscription_service.dart';
 
 /// 画面に出す、ここまでの傾向
 class GameReportMessage {
@@ -29,7 +27,7 @@ class GameReportMessage {
 ///    失敗を待たされるのが一番困るためです。費用もかかりません。
 /// 3. 失敗したらルールが作った文をそのまま出す。利用者には何も起きません。
 ///
-/// プレミアム限定です。
+/// 課金の有無に関わらず出します（課金対象は統計画面だけです）。
 class LiveCoachService {
   LiveCoachService._(); // インスタンス化を防ぐ
 
@@ -50,10 +48,6 @@ class LiveCoachService {
   ///
   /// 出せるものが無ければnullを返します（呼び出し側は表示を消してください）。
   static Future<GameReportMessage?> report(PairReport report) async {
-    if (!await isEntitled()) {
-      debugPrint('ゲームごとの振り返り: 課金していないので出さない');
-      return null;
-    }
     if (!report.hasContent) {
       debugPrint('ゲームごとの振り返り: 出せる材料がない');
       return null;
@@ -76,15 +70,6 @@ class LiveCoachService {
   ///
   /// 読み込んだモデルはメモリを大きく使うため、試合が終わったら解放します。
   static Future<void> onLeaveMatch() => LocalLlm.release();
-
-  /// 使ってよい状態か（課金しているか）
-  ///
-  /// 動作確認のときだけ、デバッグビルドに限り課金判定を飛ばせます。
-  /// リリースビルドでは [AiConfig.forcePremium] が立っていても無視されます。
-  static Future<bool> isEntitled() async {
-    if (kDebugMode && AiConfig.forcePremium) return true;
-    return SubscriptionService.isSubscribed();
-  }
 
   /// 一言を端末内LLMで整える（使えないときはnull）
   static Future<String?> _phrase(String? summary) async {

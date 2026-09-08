@@ -11,7 +11,6 @@ import 'package:soft_tennis_scoring/models/match.dart';
 import 'package:soft_tennis_scoring/models/game_score.dart';
 import 'package:soft_tennis_scoring/models/point_detail.dart';
 import 'package:soft_tennis_scoring/screens/main_menu_screen.dart';
-import 'package:soft_tennis_scoring/services/subscription_service.dart';
 import 'package:soft_tennis_scoring/utils/game_rules.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/match_settings_dialog.dart';
 import 'package:soft_tennis_scoring/widgets/common/pair_report_view.dart';
@@ -37,7 +36,6 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
   bool _isLoading = true;
   bool _isMatchCompleted = false;
   bool _detailMode = false; // 詳細入力モード
-  bool _isSubscribed = false; // サブスク状態
   bool _firstServeIn = true; // 1stサーブ選択（メイン画面用）
   List<PointDetail> _pointDetails = []; // 詳細ポイントデータ
 
@@ -53,7 +51,6 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
   @override
   void initState() {
     super.initState();
-    _loadSubscriptionStatus();
     _loadDetailModeSetting();
     _loadMatchData();
   }
@@ -65,31 +62,12 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     super.dispose();
   }
 
-  /// サブスクリプション状態を読み込む
-  Future<void> _loadSubscriptionStatus() async {
-    final isSubscribed = await SubscriptionService.isSubscribed();
-    setState(() {
-      _isSubscribed = isSubscribed;
-      // サブスク解除された場合、詳細モードをオフにする
-      if (!isSubscribed && _detailMode) {
-        _detailMode = false;
-        _saveDetailModeSetting(false);
-      }
-    });
-  }
-
   /// 詳細入力モード設定を読み込む
   Future<void> _loadDetailModeSetting() async {
     final prefs = await SharedPreferences.getInstance();
-    final isSubscribed = await SubscriptionService.isSubscribed();
     setState(() {
-      // サブスク加入者のみ詳細モードを有効化できる
-      if (isSubscribed) {
-        _detailMode = prefs.getBool('detail_mode') ?? false;
-      } else {
-        // フリープランの場合は必ずOFF
-        _detailMode = false;
-      }
+      // 分析+は無料で使える（課金対象は統計画面だけ）
+      _detailMode = prefs.getBool('detail_mode') ?? false;
     });
   }
 
@@ -97,77 +75,6 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
   Future<void> _saveDetailModeSetting(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('detail_mode', value);
-  }
-
-  /// プレミアム機能のダイアログを表示
-  void _showPremiumRequiredDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF3E0),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(
-                Icons.workspace_premium,
-                color: Color(0xFFFF9800),
-                size: 24,
-              ),
-            ),
-            const SizedBox(width: 12),
-            const Text(
-              'プレミアム機能',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            Text(
-              '「分析+」はプレミアムプランの機能です。',
-              style: TextStyle(fontSize: 14),
-            ),
-            SizedBox(height: 12),
-            Text(
-              '分析+機能で記録できる内容：',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            SizedBox(height: 8),
-            Text('• 1stサーブ成功/フォルト'),
-            Text('• ウィナー/エラー（選手別）'),
-            SizedBox(height: 12),
-            Text(
-              'これらのデータを基に詳細な統計分析が可能になります。',
-              style: TextStyle(
-                fontSize: 12,
-                color: Color(0xFF666666),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('閉じる'),
-          ),
-        ],
-      ),
-    );
   }
 
   /// 自分側のチームを、統計画面で直近に見ていた対象から決める
@@ -199,8 +106,6 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
   Future<void> _showMatchReport() async {
     final match = _match;
     if (match == null || !mounted) return;
-    if (!await LiveCoachService.isEntitled()) return;
-    if (!mounted) return;
 
     final stats = AdvancedPointStats()
       ..addMatch(
@@ -1229,10 +1134,6 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
           // 分析+モード切り替え（プレミアム機能）
           GestureDetector(
             onTap: () {
-              if (!_isSubscribed) {
-                _showPremiumRequiredDialog();
-                return;
-              }
               setState(() {
                 _detailMode = !_detailMode;
               });
@@ -1242,37 +1143,31 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
               margin: const EdgeInsets.only(right: 8),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: _detailMode && _isSubscribed ? const Color(0xFF1E293B) : Colors.transparent,
+                color: _detailMode ? const Color(0xFF1E293B) : Colors.transparent,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: _detailMode && _isSubscribed ? const Color(0xFF1E293B) : const Color(0xFFCCCCCC),
+                  color: _detailMode ? const Color(0xFF1E293B) : const Color(0xFFCCCCCC),
                   width: 1.5,
                 ),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (!_isSubscribed)
-                    const Icon(
-                      Icons.lock,
-                      size: 12,
-                      color: Color(0xFF888888),
-                    )
-                  else
-                    Icon(
-                      _detailMode ? Icons.check_circle : Icons.circle_outlined,
-                      size: 14,
-                      color: _detailMode ? Colors.white : const Color(0xFFAAAAAA),
-                    ),
+                  Icon(
+                    _detailMode ? Icons.check_circle : Icons.circle_outlined,
+                    size: 14,
+                    color:
+                        _detailMode ? Colors.white : const Color(0xFFAAAAAA),
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     '分析+',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: _isSubscribed
-                          ? (_detailMode ? Colors.white : const Color(0xFF666666))
-                          : const Color(0xFF888888),
+                      color: _detailMode
+                          ? Colors.white
+                          : const Color(0xFF666666),
                     ),
                   ),
                 ],

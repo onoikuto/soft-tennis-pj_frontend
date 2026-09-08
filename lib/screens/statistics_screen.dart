@@ -6,12 +6,11 @@ import 'package:soft_tennis_scoring/models/game_score.dart';
 import 'package:soft_tennis_scoring/services/advanced_stats.dart';
 import 'package:soft_tennis_scoring/services/ai_insight_service.dart';
 import 'package:soft_tennis_scoring/services/insight_engine.dart';
-import 'package:soft_tennis_scoring/services/pair_report.dart';
+import 'package:soft_tennis_scoring/services/stats_advice.dart';
 import 'package:soft_tennis_scoring/services/statistics_calculator.dart';
 import 'package:soft_tennis_scoring/services/subscription_service.dart';
 import 'package:soft_tennis_scoring/widgets/statistics/ad_banner.dart';
-import 'package:soft_tennis_scoring/widgets/common/pair_report_view.dart';
-import 'package:soft_tennis_scoring/widgets/statistics/analysis_comment_card.dart';
+import 'package:soft_tennis_scoring/widgets/statistics/stats_advice_card.dart';
 import 'package:soft_tennis_scoring/widgets/statistics/detailed_statistics_card.dart';
 import 'package:soft_tennis_scoring/widgets/statistics/deuce_win_rate_card.dart';
 import 'package:soft_tennis_scoring/widgets/statistics/final_game_win_rate_card.dart';
@@ -74,7 +73,11 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   AdvancedPointStats _advancedPointStats = AdvancedPointStats();
 
   // 分析コメント
-  List<Insight> _insights = [];
+  /// タブごとのAIアドバイス
+  List<StatsAdviceLine> _adviceLines = [];
+
+  /// アドバイスを端末内LLMで整えたものか
+  bool _advicePhrasedByAi = false;
 
   @override
   void initState() {
@@ -238,7 +241,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
         _monthlyWinRates = [];
         _opponentRecords = [];
         _advancedPointStats = AdvancedPointStats();
-        _insights = [];
+        _adviceLines = [];
       });
       return;
     }
@@ -279,20 +282,13 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       // 表示はまずルールベースで確定させる。AI分析は生成済みのときだけ
       // 差し替えるので、統計画面は常に待ち時間なしで開き、生成に失敗して
       // いても「分析が出ない」状態にはならない。
-      _insights = InsightEngine.generate(result.insightInput);
+      _adviceLines = StatsAdviceEngine.generate(subject.view, result.insightInput)
+          .map((a) => a.toLine())
+          .toList();
+      _advicePhrasedByAi = false;
     });
 
     await _applyAiInsights(subject, result.insightInput);
-  }
-
-  /// いま見ている対象からペアの2選手を求める
-  ///
-  /// ペア単位のときは表示名（例「山田・佐藤」）から取れます。
-  /// 学校単位・個人単位のときは決まらないので、記録に出てくる選手から
-  /// 本数の多い順に使います（[PairReport.build] 側で処理されます）。
-  List<String> _pairPlayerNames() {
-    if (_selectedView != 0 || _selectedPair == null) return const [];
-    return _selectedPair!.split(' (').first.split('・');
   }
 
   /// AIが生成済みの分析コメントがあれば差し替える
@@ -306,7 +302,10 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       if (!mounted) return;
 
       if (aiInsights != null && aiInsights.isNotEmpty) {
-        setState(() => _insights = aiInsights);
+        setState(() {
+          _adviceLines = aiInsights;
+          _advicePhrasedByAi = true;
+        });
       } else {
         AiInsightService.scheduleGeneration(subject);
       }
@@ -377,40 +376,41 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // サブスクリプション未購入の場合、アップグレード促しを表示
-                              if (!_isSubscribed) UpgradePromptCard(onUpgradePressed: _showSubscriptionDialog),
-                              // セグメントコントロール（サブスクリプション未購入の場合はペア単位のみ）
-                              if (_isSubscribed) _buildSegmentedControl(),
-                              if (!_isSubscribed) _buildLimitedSegmentedControl(),
-                              const SizedBox(height: 16),
-                              // ペア/組織選択（リスト形式）
-                              if (_isSubscribed || _selectedView == 0) _buildSelectionList(),
-                              const SizedBox(height: 16),
-                              // 選択中の表示
-                              if (_selectedPair != null) _buildSelectedInfo(),
-                              const SizedBox(height: 16),
-                              // 通算試合数と勝率（常に表示）
-                              TotalStatsCard(totalMatches: _totalMatches, winRate: _winRate),
-                              // 勝率の推移（常に表示）
-                              if (_recentResults.isNotEmpty) ...[
-                                const SizedBox(height: 16),
-                                WinRateTrendCard(
-                                  recentResults: _recentResults,
-                                  monthly: _monthlyWinRates,
-                                ),
-                              ],
-                              // 対戦相手別成績（常に表示）
-                              if (_opponentRecords.isNotEmpty) ...[
-                                const SizedBox(height: 16),
-                                OpponentRecordsCard(opponents: _opponentRecords),
-                              ],
-                              // 広告表示（サブスクリプション未購入の場合）
+                              // 統計はまるごとプレミアム限定。
+                              // 未購入のときは案内と広告だけを出す。
                               if (!_isSubscribed) ...[
+                                UpgradePromptCard(
+                                    onUpgradePressed: _showSubscriptionDialog),
                                 const SizedBox(height: 16),
                                 AdBanner(isSubscribed: _isSubscribed),
                               ],
-                              // サブスクリプション未購入の場合、他の統計は表示しない
                               if (_isSubscribed) ...[
+                                _buildSegmentedControl(),
+                                const SizedBox(height: 16),
+                                // ペア/組織選択（リスト形式）
+                                _buildSelectionList(),
+                                const SizedBox(height: 16),
+                                // 選択中の表示
+                                if (_selectedPair != null) _buildSelectedInfo(),
+                                const SizedBox(height: 16),
+                                // 通算試合数と勝率
+                                TotalStatsCard(
+                                    totalMatches: _totalMatches,
+                                    winRate: _winRate),
+                                // 勝率の推移
+                                if (_recentResults.isNotEmpty) ...[
+                                  const SizedBox(height: 16),
+                                  WinRateTrendCard(
+                                    recentResults: _recentResults,
+                                    monthly: _monthlyWinRates,
+                                  ),
+                                ],
+                                // 対戦相手別成績
+                                if (_opponentRecords.isNotEmpty) ...[
+                                  const SizedBox(height: 16),
+                                  OpponentRecordsCard(
+                                      opponents: _opponentRecords),
+                                ],
                                 const SizedBox(height: 16),
                                 // ゲーム別の得点率
                                 GameWinRatesCard(gameWinRates: _gameWinRates),
@@ -451,43 +451,13 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                                   MomentumCard(stats: _advancedPointStats),
                                 ],
                                 if (_hasPointDetails) ...[
-                                  const SizedBox(height: 16),
-                                  // 選手ごとの良かった点・課題（累計）
-                                  Container(
-                                    width: double.infinity,
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                          color: const Color(0xFFE5E5E5)),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        const Text(
-                                          'ペアのまとめ',
-                                          style: TextStyle(
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.bold,
-                                            color: Color(0xFF333333),
-                                          ),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        PairReportView(
-                                          report: PairReport.build(
-                                            _advancedPointStats,
-                                            playerNames: _pairPlayerNames(),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
                                 ],
                                 const SizedBox(height: 16),
-                                // 分析コメント（ローカルのルールベースで生成）
-                                AnalysisCommentCard(insights: _insights),
+                                // タブごとのAIアドバイス
+                                StatsAdviceCard(
+                                  lines: _adviceLines,
+                                  phrasedByAi: _advicePhrasedByAi,
+                                ),
                               ],
                               const SizedBox(height: 32),
                             ],
@@ -497,131 +467,6 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                     },
                   ),
                 ),
-    );
-  }
-
-  Widget _buildLimitedSegmentedControl() {
-    // サブスクリプション未購入の場合、ペア単位のみ表示
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF2F2F2),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: GestureDetector(
-              onTap: () {
-                setState(() {
-                  _selectedView = 0;
-                  _selectedPair = _pairs.isNotEmpty ? _pairs.first : null;
-                });
-                _calculateStatistics();
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    const Text(
-                      'ペア単位',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF1E293B),
-                      ),
-                    ),
-                    const Text(
-                      'By Pair',
-                      style: TextStyle(
-                        fontSize: 8,
-                        color: Color(0xFF1E293B),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: Opacity(
-              opacity: 0.5,
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Column(
-                  children: [
-                    const Text(
-                      '学校・クラブ単位',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.normal,
-                        color: Color(0xFF888888),
-                      ),
-                    ),
-                    const Text(
-                      'By Organization',
-                      style: TextStyle(
-                        fontSize: 8,
-                        color: Color(0xFF888888),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    const Icon(
-                      Icons.lock,
-                      size: 12,
-                      color: Color(0xFF888888),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: Opacity(
-              opacity: 0.5,
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Column(
-                  children: [
-                    const Text(
-                      '選手単位',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.normal,
-                        color: Color(0xFF888888),
-                      ),
-                    ),
-                    const Text(
-                      'By Player',
-                      style: TextStyle(
-                        fontSize: 8,
-                        color: Color(0xFF888888),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    const Icon(
-                      Icons.lock,
-                      size: 12,
-                      color: Color(0xFF888888),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 

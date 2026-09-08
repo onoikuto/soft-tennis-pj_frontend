@@ -9,6 +9,7 @@ import 'package:soft_tennis_scoring/config/ai_config.dart';
 import 'package:soft_tennis_scoring/config/local_ai_config.dart';
 import 'package:soft_tennis_scoring/database/database_helper.dart';
 import 'package:soft_tennis_scoring/services/insight_engine.dart';
+import 'package:soft_tennis_scoring/services/stats_advice.dart';
 import 'package:soft_tennis_scoring/services/local_llm.dart';
 import 'package:soft_tennis_scoring/services/statistics_calculator.dart';
 import 'package:soft_tennis_scoring/services/subscription_service.dart';
@@ -69,7 +70,7 @@ class AiInsightService {
   ///
   /// 未生成・古い・非課金・未設定のいずれかならnullを返します。
   /// 呼び出し側は null のときルールベースの分析を表示してください。
-  static Future<List<Insight>?> cachedInsights(
+  static Future<List<StatsAdviceLine>?> cachedInsights(
     StatsSubject subject,
     InsightInput input,
   ) async {
@@ -182,13 +183,15 @@ class AiInsightService {
     _generating = true;
     try {
       // 何を言うかはルールベースが決め切る。LLMには言い回しだけを頼む。
-      final base = InsightEngine.generate(input);
+      // タブ（ペア/学校・クラブ/選手）で見るべきものが違うので、
+      // 対象の種別をそのまま渡す。
+      final base = StatsAdviceEngine.generate(subject.view, input);
       final comments = <Map<String, String>>[];
-      for (final insight in base) {
-        final phrased = await _phrase(insight);
+      for (final advice in base) {
+        final phrased = await _phrase(advice.text);
         comments.add({
-          'type': _typeKey(insight.type),
-          'text': phrased ?? insight.text,
+          'type': _categoryKey(advice.category),
+          'text': phrased ?? advice.text,
         });
       }
       if (comments.isEmpty) return false;
@@ -221,13 +224,13 @@ class AiInsightService {
   ///
   /// 失敗・未設定・タイムアウトのときはnullを返し、呼び出し側は
   /// [Insight.text]（ルールベースの定型文）をそのまま使います。
-  static Future<String?> _phrase(Insight insight) async {
+  static Future<String?> _phrase(String text) async {
     if (!LocalAiConfig.isConfigured) return null;
 
     try {
       final generated = await LocalLlm.generate(
         '次のコメントを、言い回しだけ整えてください。\n'
-        'コメント: ${insight.text}\n'
+        'コメント: $text\n'
         '整えた1文だけを出力してください。',
         systemInstruction: _systemInstruction,
         timeout: LocalAiConfig.reviewTimeout,
@@ -257,11 +260,14 @@ class AiInsightService {
     return text;
   }
 
-  static String _typeKey(InsightType type) => switch (type) {
-        InsightType.good => 'good',
-        InsightType.warning => 'warning',
-        InsightType.info => 'info',
+  /// アドバイスの区分を保存用のキーにする
+  static String _categoryKey(StatsAdviceCategory category) =>
+      switch (category) {
+        StatsAdviceCategory.practice => 'practice',
+        StatsAdviceCategory.mental => 'mental',
+        StatsAdviceCategory.tactics => 'tactics',
       };
+
 
   /// AI分析を使ってよい状態か（課金しているか）
   ///
@@ -344,29 +350,26 @@ class AiInsightService {
   // 受信データの解釈
   // ============================================================================
 
-  /// キャッシュのJSONを[Insight]のリストへ戻す
-  static List<Insight> _decodeComments(String json) {
+  /// キャッシュのJSONを表示用の行に戻す
+  static List<StatsAdviceLine> _decodeComments(String json) {
     final decoded = jsonDecode(json);
     if (decoded is! List) return const [];
 
-    final insights = <Insight>[];
-    for (var i = 0; i < decoded.length; i++) {
-      final item = decoded[i];
+    final lines = <StatsAdviceLine>[];
+    for (final item in decoded) {
       if (item is! Map) continue;
       final text = (item['text'] as Object?)?.toString() ?? '';
       if (text.isEmpty) continue;
 
-      insights.add(Insight(
-        type: switch (item['type']) {
-          'good' => InsightType.good,
-          'warning' => InsightType.warning,
-          _ => InsightType.info,
+      lines.add(StatsAdviceLine(
+        category: switch (item['type']) {
+          'practice' => StatsAdviceCategory.practice,
+          'mental' => StatsAdviceCategory.mental,
+          _ => StatsAdviceCategory.tactics,
         },
-        // 生成された順をそのまま表示順にする
-        priority: decoded.length - i,
         text: text,
       ));
     }
-    return insights;
+    return lines;
   }
 }
