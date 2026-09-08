@@ -5,6 +5,8 @@ import 'package:soft_tennis_scoring/database/database_helper.dart';
 import 'package:soft_tennis_scoring/services/ai_insight_service.dart';
 import 'package:soft_tennis_scoring/services/live_coach_engine.dart';
 import 'package:soft_tennis_scoring/services/live_coach_service.dart';
+import 'package:soft_tennis_scoring/services/advanced_stats.dart';
+import 'package:soft_tennis_scoring/services/pair_report.dart';
 import 'package:soft_tennis_scoring/services/statistics_calculator.dart';
 import 'package:soft_tennis_scoring/models/match.dart';
 import 'package:soft_tennis_scoring/models/game_score.dart';
@@ -13,6 +15,7 @@ import 'package:soft_tennis_scoring/screens/main_menu_screen.dart';
 import 'package:soft_tennis_scoring/services/subscription_service.dart';
 import 'package:soft_tennis_scoring/utils/game_rules.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/match_settings_dialog.dart';
+import 'package:soft_tennis_scoring/widgets/common/pair_report_view.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/live_advice_card.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/point_detail_dialog.dart';
 import 'package:soft_tennis_scoring/widgets/scoring/score_table_cells.dart';
@@ -188,6 +191,52 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
     final team = subject.isTeam1(match) ? 'team1' : 'team2';
     if (!mounted || team == _myTeam) return;
     setState(() => _myTeam = team);
+  }
+
+  /// 試合が終わったところで、この試合だけの振り返りを出す
+  ///
+  /// 統計画面（累計）と同じ作り方・同じ見た目を使います。数字は同じなのに
+  /// 言い方が違う、という事故を避けるためです。
+  Future<void> _showMatchReport() async {
+    final match = _match;
+    if (match == null || !mounted) return;
+    if (!await LiveCoachService.isEntitled()) return;
+    if (!mounted) return;
+
+    final stats = AdvancedPointStats()
+      ..addMatch(
+        myTeam: _myTeam,
+        points: _pointDetails,
+        gameScores: _gameScores,
+        gameCount: match.gameCount,
+      );
+
+    final report = PairReport.build(
+      stats,
+      playerNames: _myTeam == 'team1'
+          ? [match.team1Player1, match.team1Player2]
+          : [match.team2Player1, match.team2Player2],
+    );
+    if (!report.hasContent || !mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'この試合の振り返り',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        content: SingleChildScrollView(child: PairReportView(report: report)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('閉じる'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 試合中アドバイスを取り直す
@@ -667,6 +716,8 @@ class _OfficialScoringScreenState extends State<OfficialScoringScreen> {
           // 試合が1つ増えたので、AI分析を作り直す予約を入れる。
           // すぐには走らず、最後の保存から少し待ってから1回だけ生成される。
           await AiInsightService.scheduleGenerationAfterMatchSaved();
+          // この試合だけの振り返りをその場で見せる
+          await _showMatchReport();
         }
       } else {
         // 試合が続行する場合、次のゲームの先サーブを表示するために

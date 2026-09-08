@@ -129,7 +129,11 @@ class LocalLlm {
     required int maxTokens,
   }) async {
     if (_busy) return null;
-    if (!await isReady()) return null;
+    if (!await isReady()) {
+      debugPrint('端末内LLM: まだ使えない'
+          '（設定=${LocalAiConfig.isConfigured} / 対応端末=$isSupported）');
+      return null;
+    }
 
     _busy = true;
     InferenceModelSession? session;

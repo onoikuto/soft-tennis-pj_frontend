@@ -87,13 +87,13 @@ class LiveCoachEngine {
   LiveCoachEngine._(); // インスタンス化を防ぐ
 
   /// 球種の偏りを指摘するのに必要な、入力済みの最少本数
-  static const int _minShots = 4;
+  ///
+  /// 1ゲームは4〜7ポイントしかなく、そのうち球種が入るのは自分たちの
+  /// ウィナーとミスだけです。4本にすると2〜3ゲーム目まで何も出ません。
+  static const int _minShots = 3;
 
   /// コースの偏りを指摘するのに必要な、入力済みの最少本数
-  static const int _minCourses = 4;
-
-  /// ミスの種類の偏りを指摘するのに必要な、入力済みの最少本数
-  static const int _minErrorTypes = 6;
+  static const int _minCourses = 3;
 
   /// 1stサーブ成功率を出すのに必要な最少本数
   static const int _minServes = 6;
@@ -110,7 +110,6 @@ class LiveCoachEngine {
 
     _addConcedingPattern(input, advices);
     _addScoringPattern(input, advices);
-    _addErrorTypeRatio(input, advices);
     _addFirstServeRate(input, advices);
 
     advices.sort((a, b) => b.priority.compareTo(a.priority));
@@ -225,37 +224,6 @@ class LiveCoachEngine {
       isGood: isGood,
       facts: facts,
     );
-  }
-
-  /// ミスの種類の内訳（ネットかアウトか）
-  static void _addErrorTypeRatio(LiveCoachInput input, List<LiveAdvice> out) {
-    if (!input.detailMode) return;
-
-    final lost = input.pointDetails
-        .where((p) =>
-            p.pointWinner == input.opponentTeam &&
-            p.pointType == PointType.opponentError)
-        .toList();
-
-    final counts = _countBy(lost, (p) => p.errorType);
-    final top = _mostCommon(counts);
-    if (top == null || counts.total < _minErrorTypes) return;
-    // 半分以下なら偏っているとは言えない
-    if (top.count * 2 < counts.total) return;
-
-    final label = ErrorType.getDisplay(top.key);
-    out.add(LiveAdvice(
-      key: 'error_type_ratio',
-      headline: label,
-      template: 'ミス${counts.total}本のうち${top.count}本が$label。',
-      priority: 55,
-      isGood: false,
-      facts: {
-        'ミスの種類': label,
-        'その本数': '${top.count}本',
-        '入力済みのミス': '${counts.total}本',
-      },
-    ));
   }
 
   /// 1stサーブの成功率

@@ -309,20 +309,6 @@ class InsightEngine {
       ));
     }
 
-    // ネットかアウトか（直し方が逆になるので分けて出す）
-    final errorType = AdvancedPointStats.topOf(stats.errorTypes);
-    if (errorType != null && stats.errorTypeTotal >= 10) {
-      final percent = (errorType.value / stats.errorTypeTotal * 100).round();
-      if (percent >= 50) {
-        insights.add(Insight(
-          type: InsightType.warning,
-          text: 'ミスの内訳は${ErrorType.getDisplay(errorType.key)}が'
-              '${errorType.value}本（$percent%）で最多です。',
-          priority: 65,
-        ));
-      }
-    }
-
     // 得点しやすい展開・失点しやすい展開
     final winnerCourse = AdvancedPointStats.topOf(stats.winnerCourses);
     if (winnerCourse != null && _sum(stats.winnerCourses) >= 10) {

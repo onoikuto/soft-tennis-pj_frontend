@@ -6,9 +6,11 @@ import 'package:soft_tennis_scoring/models/game_score.dart';
 import 'package:soft_tennis_scoring/services/advanced_stats.dart';
 import 'package:soft_tennis_scoring/services/ai_insight_service.dart';
 import 'package:soft_tennis_scoring/services/insight_engine.dart';
+import 'package:soft_tennis_scoring/services/pair_report.dart';
 import 'package:soft_tennis_scoring/services/statistics_calculator.dart';
 import 'package:soft_tennis_scoring/services/subscription_service.dart';
 import 'package:soft_tennis_scoring/widgets/statistics/ad_banner.dart';
+import 'package:soft_tennis_scoring/widgets/common/pair_report_view.dart';
 import 'package:soft_tennis_scoring/widgets/statistics/analysis_comment_card.dart';
 import 'package:soft_tennis_scoring/widgets/statistics/detailed_statistics_card.dart';
 import 'package:soft_tennis_scoring/widgets/statistics/deuce_win_rate_card.dart';
@@ -283,6 +285,16 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     await _applyAiInsights(subject, result.insightInput);
   }
 
+  /// いま見ている対象からペアの2選手を求める
+  ///
+  /// ペア単位のときは表示名（例「山田・佐藤」）から取れます。
+  /// 学校単位・個人単位のときは決まらないので、記録に出てくる選手から
+  /// 本数の多い順に使います（[PairReport.build] 側で処理されます）。
+  List<String> _pairPlayerNames() {
+    if (_selectedView != 0 || _selectedPair == null) return const [];
+    return _selectedPair!.split(' (').first.split('・');
+  }
+
   /// AIが生成済みの分析コメントがあれば差し替える
   ///
   /// 生成は試合を保存した直後にバックグラウンドで走ります。ここでは待たずに
@@ -437,6 +449,41 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                                   ServeDetailCard(stats: _advancedPointStats),
                                   const SizedBox(height: 16),
                                   MomentumCard(stats: _advancedPointStats),
+                                ],
+                                if (_hasPointDetails) ...[
+                                  const SizedBox(height: 16),
+                                  // 選手ごとの良かった点・課題（累計）
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                          color: const Color(0xFFE5E5E5)),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'ペアのまとめ',
+                                          style: TextStyle(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFF333333),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        PairReportView(
+                                          report: PairReport.build(
+                                            _advancedPointStats,
+                                            playerNames: _pairPlayerNames(),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 ],
                                 const SizedBox(height: 16),
                                 // 分析コメント（ローカルのルールベースで生成）

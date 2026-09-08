@@ -188,7 +188,7 @@ void main() {
 
     test('入力が少なければ何も言わない', () {
       final advices = LiveCoachEngine.evaluate(_input(
-        pointDetails: _ownErrors(count: 3, shotType: ShotType.backhand),
+        pointDetails: _ownErrors(count: 2, shotType: ShotType.backhand),
       ));
 
       expect(advices.map((a) => a.key), isNot(contains('conceding_pattern')));
@@ -263,18 +263,7 @@ void main() {
     });
   });
 
-  group('LiveCoachEngine ミスの種類と1stサーブ', () {
-    test('ミスの内訳が偏っていれば本数で言う', () {
-      final advice = LiveCoachEngine.evaluate(_input(
-        pointDetails: [
-          ..._ownErrors(count: 5, errorType: ErrorType.net),
-          ..._ownErrors(count: 2, errorType: ErrorType.out, startAt: 6),
-        ],
-      )).firstWhere((a) => a.key == 'error_type_ratio');
-
-      expect(advice.template, 'ミス7本のうち5本がネット。');
-    });
-
+  group('LiveCoachEngine 1stサーブ', () {
     test('1stサーブは低いときだけ本数で言う', () {
       final low = LiveCoachEngine.evaluate(_input(
         pointDetails: [

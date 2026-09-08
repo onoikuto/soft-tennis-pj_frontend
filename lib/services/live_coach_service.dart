@@ -101,12 +101,25 @@ class LiveCoachService {
     LiveCoachInput input, {
     bool force = false,
   }) async {
-    if (!await isEntitled()) return const LiveCoachUpdate.none();
+    if (!await isEntitled()) {
+      debugPrint('試合中の気づき: 課金していないので出さない');
+      return const LiveCoachUpdate.none();
+    }
 
     final advice = LiveCoachEngine.advise(input);
-    if (advice == null) return const LiveCoachUpdate.none();
+    if (advice == null) {
+      // 出せない理由が「入力が足りない」のか他かは、ここの内訳で分かる
+      debugPrint('試合中の気づき: 該当なし'
+          '（ポイント${input.pointDetails.length}件 / 分析+${input.detailMode} / '
+          '自チーム${input.myTeam}）');
+      return const LiveCoachUpdate.none();
+    }
 
-    if (!force && !_shouldShow(advice)) return const LiveCoachUpdate.unchanged();
+    if (!force && !_shouldShow(advice)) {
+      debugPrint('試合中の気づき: 間隔待ち（${advice.key}）');
+      return const LiveCoachUpdate.unchanged();
+    }
+    debugPrint('試合中の気づき: ${advice.key} / ${advice.template}');
     _lastShownAt = DateTime.now();
     _lastKey = advice.key;
 
@@ -159,6 +172,7 @@ class LiveCoachService {
         timeout: LocalAiConfig.liveTimeout,
         maxTokens: LocalAiConfig.liveMaxTokens,
       );
+      debugPrint('試合中の気づき: LLM出力=${generated ?? "(なし)"}');
       return sanitize(generated);
     } catch (e) {
       debugPrint('試合中アドバイスの言い換えに失敗: $e');

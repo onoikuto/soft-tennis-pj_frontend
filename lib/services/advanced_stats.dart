@@ -166,6 +166,28 @@ class AdvancedPointStats {
   /// 選手別のミス本数
   final Map<String, int> playerErrors = {};
 
+  /// 選手別・球種別のウィナー本数
+  final Map<String, Map<String, int>> playerWinnerShots = {};
+
+  /// 選手別・コース別のウィナー本数
+  final Map<String, Map<String, int>> playerWinnerCourses = {};
+
+  /// 選手別・球種別のミス本数
+  final Map<String, Map<String, int>> playerErrorShots = {};
+
+  /// 選手別・コース別のミス本数
+  final Map<String, Map<String, int>> playerErrorCourses = {};
+
+  /// 記録に出てくる自チームの選手名（本数の多い順）
+  List<String> get involvedPlayers {
+    final totals = <String, int>{};
+    playerWinners.forEach((name, count) => totals[name] = (totals[name] ?? 0) + count);
+    playerErrors.forEach((name, count) => totals[name] = (totals[name] ?? 0) + count);
+    final names = totals.keys.toList()
+      ..sort((a, b) => totals[b]!.compareTo(totals[a]!));
+    return names;
+  }
+
   double get firstServePointRate =>
       firstServePointTotal == 0 ? 0.0 : firstServePointWon / firstServePointTotal * 100;
   double get secondServePointRate =>
@@ -213,6 +235,17 @@ class AdvancedPointStats {
   static void _bump(Map<String, int> counts, String? key) {
     if (key == null || key.isEmpty) return;
     counts[key] = (counts[key] ?? 0) + 1;
+  }
+
+  /// 選手別の内訳を1つ数える（選手名か項目が未入力なら数えない）
+  static void _bumpNested(
+    Map<String, Map<String, int>> counts,
+    String? player,
+    String? key,
+  ) {
+    if (player == null || player.isEmpty) return;
+    if (key == null || key.isEmpty) return;
+    _bump(counts.putIfAbsent(player, () => {}), key);
   }
 
   /// 1試合分のポイント詳細を集計に追加
@@ -279,11 +312,15 @@ class AdvancedPointStats {
           _bump(winnerShots, point.shotType);
           _bump(winnerCourses, point.courseType);
           _bump(playerWinners, point.actionPlayer);
+          _bumpNested(playerWinnerShots, point.actionPlayer, point.shotType);
+          _bumpNested(playerWinnerCourses, point.actionPlayer, point.courseType);
         } else if (!won && point.pointType == PointType.opponentError) {
           _bump(errorShots, point.shotType);
           _bump(errorCourses, point.courseType);
           _bump(errorTypes, point.errorType);
           _bump(playerErrors, point.actionPlayer);
+          _bumpNested(playerErrorShots, point.actionPlayer, point.shotType);
+          _bumpNested(playerErrorCourses, point.actionPlayer, point.courseType);
         }
 
         // 失点直後のポイント（同一ゲーム内）

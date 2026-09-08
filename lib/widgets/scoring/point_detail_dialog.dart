@@ -76,20 +76,19 @@ class _PointDetailDialogState extends State<PointDetailDialog> {
   }
 
   Future<void> _selectAndSave(String pointType, String actionPlayer) async {
-    String? errorType;
-    if (pointType == PointType.opponentError) {
-      // ミスの種類は一手間かかるので、失点チームを選んだ直後だけ追加で聞く
-      errorType = await _pickErrorType();
-      if (!mounted) return;
-    }
-
     // ウィナー・ミスどちらでも、何のショットだったかを聞く（スキップ可）
     final shotType = await _pickShotType(_actingTeam(pointType));
     if (!mounted) return;
 
     // どのコースへ打った球だったかを聞く（スキップ可）
-    final courseType = await _pickCourseType();
-    if (!mounted) return;
+    //
+    // サーブ・レシーブで決まった/崩れたポイントは展開が生まれる前に
+    // 終わっているので、聞きません（聞いても答えようがない）。
+    String? courseType;
+    if (shotType != ShotType.serve && shotType != ShotType.receive) {
+      courseType = await _pickCourseType();
+      if (!mounted) return;
+    }
 
     final pointDetail = PointDetail(
       matchId: widget.matchId,
@@ -101,48 +100,12 @@ class _PointDetailDialogState extends State<PointDetailDialog> {
       pointWinner: widget.pointWinner,
       pointType: pointType,
       actionPlayer: actionPlayer,
-      errorType: errorType,
       shotType: shotType,
       courseType: courseType,
       createdAt: DateTime.now(),
     );
     if (!mounted) return;
     Navigator.of(context).pop(pointDetail);
-  }
-
-  /// ミスの種類（ネット・アウト・ダブルフォルト）を選ばせる
-  ///
-  /// 「スキップ」も選べます。任意入力にしないと、急いでいる試合中の入力が
-  /// 止まってしまうためです。
-  Future<String?> _pickErrorType() {
-    return showDialog<String?>(
-      context: context,
-      builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'ミスの種類は？',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF333333)),
-              ),
-              const SizedBox(height: 16),
-              for (final type in ErrorType.all) ...[
-                _choiceButton(ctx, ErrorType.getDisplay(type), type),
-                const SizedBox(height: 8),
-              ],
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(null),
-                child: const Text('スキップ', style: TextStyle(color: Color(0xFF999999))),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   /// ショットの種類（フォアハンド・バックハンド・ボレー等）を選ばせる
@@ -210,7 +173,7 @@ class _PointDetailDialogState extends State<PointDetailDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'コースは？',
+                '何展開？',
                 style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
