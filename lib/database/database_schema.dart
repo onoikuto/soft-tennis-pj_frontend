@@ -174,6 +174,8 @@ class DatabaseSchema {
         point_winner TEXT NOT NULL,
         point_type TEXT NOT NULL,
         action_player TEXT,
+        error_type TEXT,
+        shot_type TEXT,
         created_at TEXT NOT NULL,
         FOREIGN KEY (match_id) REFERENCES matches (id) ON DELETE CASCADE
       )
@@ -328,6 +330,16 @@ class DatabaseSchema {
           UNIQUE (scope, subject, match_id)
         )
       ''');
+    }
+    if (oldVersion < 8) {
+      // バージョン7から8へのマイグレーション
+      // ミスの種類（ネット/アウト/ダブルフォルト）カラムを追加
+      await _addColumnIfNotExists(db, 'point_details', 'error_type', 'TEXT');
+    }
+    if (oldVersion < 9) {
+      // バージョン8から9へのマイグレーション
+      // ショットの種類（フォアハンド/バックハンド/ボレー等）カラムを追加
+      await _addColumnIfNotExists(db, 'point_details', 'shot_type', 'TEXT');
     }
     // 将来のバージョンアップグレード処理をここに追加
   }

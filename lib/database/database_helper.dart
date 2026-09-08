@@ -80,7 +80,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 7, // データベースバージョン（スキーマ変更時に増加）
+      version: 9, // データベースバージョン（スキーマ変更時に増加）
       onCreate: DatabaseSchema.createDB,
       onUpgrade: DatabaseSchema.onUpgrade,
     );

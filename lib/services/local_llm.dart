@@ -57,6 +57,8 @@ class LocalLlm {
     if (!LocalAiConfig.isConfigured || !isSupported) return false;
     try {
       await _ensureInitialized();
+      // ファイルを直接読む構成では、参照を張った時点で使える状態になる
+      if (LocalAiConfig.usesLocalFile) return FlutterGemma.hasActiveModel();
       return FlutterGemma.isModelInstalled(LocalAiConfig.modelFileName);
     } catch (e) {
       debugPrint('端末内LLMの状態を確認できませんでした: $e');
@@ -82,13 +84,20 @@ class LocalLlm {
 
     try {
       await _ensureInitialized();
-      final builder = FlutterGemma.installModel(
+      var builder = FlutterGemma.installModel(
         modelType: _modelType,
         fileType: _fileType,
-      ).fromNetwork(
-        LocalAiConfig.modelUrl,
-        token: LocalAiConfig.modelToken.isEmpty ? null : LocalAiConfig.modelToken,
       );
+      if (LocalAiConfig.usesLocalFile) {
+        // 端末に置いたファイルをそのまま使う（動作確認用）
+        builder = builder.fromFile(LocalAiConfig.modelFilePath);
+      } else {
+        builder = builder.fromNetwork(
+          LocalAiConfig.modelUrl,
+          token:
+              LocalAiConfig.modelToken.isEmpty ? null : LocalAiConfig.modelToken,
+        );
+      }
       if (onProgress != null) builder.withProgress(onProgress);
       await builder.install();
       return true;
@@ -222,7 +231,7 @@ class LocalLlm {
 
   /// ファイル名の拡張子から形式を判定する
   static ModelFileType get _fileType {
-    const name = LocalAiConfig.modelFileName;
+    final name = LocalAiConfig.modelFileName;
     if (name.endsWith('.litertlm')) return ModelFileType.litertlm;
     if (name.endsWith('.bin') || name.endsWith('.tflite')) {
       return ModelFileType.binary;

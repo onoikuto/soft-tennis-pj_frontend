@@ -146,14 +146,20 @@ class _LocalAiCardState extends State<LocalAiCard> {
               width: double.infinity,
               child: OutlinedButton(
                 onPressed: _install,
-                child: const Text('ダウンロード（約${LocalAiConfig.modelSizeMb}MB）'),
+                child: Text(
+                  LocalAiConfig.usesLocalFile
+                      ? '端末のファイルを読み込む'
+                      : 'ダウンロード（約${LocalAiConfig.modelSizeMb}MB）',
+                ),
               ),
             ),
-            const SizedBox(height: 6),
-            const Text(
-              'Wi-Fiでのダウンロードをおすすめします。',
-              style: TextStyle(fontSize: 11, color: Color(0xFF999999)),
-            ),
+            if (!LocalAiConfig.usesLocalFile) ...[
+              const SizedBox(height: 6),
+              const Text(
+                'Wi-Fiでのダウンロードをおすすめします。',
+                style: TextStyle(fontSize: 11, color: Color(0xFF999999)),
+              ),
+            ],
           ],
         ],
       ),

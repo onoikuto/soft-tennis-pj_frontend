@@ -21,11 +21,31 @@ class LocalAiConfig {
   static const String modelUrl =
       String.fromEnvironment('LOCAL_AI_MODEL_URL', defaultValue: '');
 
+  /// 端末に置いたモデルファイルのパス
+  ///
+  /// `--dart-define=LOCAL_AI_MODEL_PATH=/data/local/tmp/xxx.task` のように
+  /// 指定すると、ダウンロードの代わりにそのファイルを読みます。
+  ///
+  /// **動作確認用です。** ゲート付きの配布元（HuggingFaceのGemma等）は
+  /// トークンなしで落とせないため、`adb push` などで端末に置いたファイルを
+  /// そのまま使えるようにしてあります。配布時は [modelUrl] を使ってください。
+  static const String modelFilePath =
+      String.fromEnvironment('LOCAL_AI_MODEL_PATH', defaultValue: '');
+
+  /// 端末に置いたファイルを直接読む構成か
+  static bool get usesLocalFile => modelFilePath.isNotEmpty;
+
   /// 端末に保存するときのファイル名
   ///
   /// モデルを差し替えたらこの名前も変えてください。同じ名前のまま中身を
   /// 変えると、古いファイルがダウンロード済みと判定されてしまいます。
-  static const String modelFileName = String.fromEnvironment(
+  static String get modelFileName {
+    // ファイルを直接読むときは、そのファイル名で管理する
+    if (usesLocalFile) return modelFilePath.split('/').last;
+    return _modelFileNameDefine;
+  }
+
+  static const String _modelFileNameDefine = String.fromEnvironment(
     'LOCAL_AI_MODEL_FILE',
     defaultValue: 'gemma3-1b-it-int4.task',
   );
@@ -40,8 +60,9 @@ class LocalAiConfig {
   static const String modelToken =
       String.fromEnvironment('LOCAL_AI_MODEL_TOKEN', defaultValue: '');
 
-  /// 端末内LLMを使える構成か（有効かつ配布元が指定されている）
-  static bool get isConfigured => enabled && modelUrl.isNotEmpty;
+  /// 端末内LLMを使える構成か（有効かつ入手先が指定されている）
+  static bool get isConfigured =>
+      enabled && (modelUrl.isNotEmpty || usesLocalFile);
 
   /// 生成の待ち時間の上限
   ///

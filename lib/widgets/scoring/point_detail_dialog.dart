@@ -64,7 +64,18 @@ class _PointDetailDialogState extends State<PointDetailDialog> {
     }
   }
 
-  void _selectAndSave(String pointType, String actionPlayer) {
+  Future<void> _selectAndSave(String pointType, String actionPlayer) async {
+    String? errorType;
+    if (pointType == PointType.opponentError) {
+      // ミスの種類は一手間かかるので、失点チームを選んだ直後だけ追加で聞く
+      errorType = await _pickErrorType();
+      if (!mounted) return;
+    }
+
+    // ウィナー・ミスどちらでも、何のショットだったかを聞く（スキップ可）
+    final shotType = await _pickShotType();
+    if (!mounted) return;
+
     final pointDetail = PointDetail(
       matchId: widget.matchId,
       gameNumber: widget.gameNumber,
@@ -75,9 +86,105 @@ class _PointDetailDialogState extends State<PointDetailDialog> {
       pointWinner: widget.pointWinner,
       pointType: pointType,
       actionPlayer: actionPlayer,
+      errorType: errorType,
+      shotType: shotType,
       createdAt: DateTime.now(),
     );
+    if (!mounted) return;
     Navigator.of(context).pop(pointDetail);
+  }
+
+  /// ミスの種類（ネット・アウト・ダブルフォルト）を選ばせる
+  ///
+  /// 「スキップ」も選べます。任意入力にしないと、急いでいる試合中の入力が
+  /// 止まってしまうためです。
+  Future<String?> _pickErrorType() {
+    return showDialog<String?>(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'ミスの種類は？',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF333333)),
+              ),
+              const SizedBox(height: 16),
+              for (final type in ErrorType.all) ...[
+                _choiceButton(ctx, ErrorType.getDisplay(type), type),
+                const SizedBox(height: 8),
+              ],
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(null),
+                child: const Text('スキップ', style: TextStyle(color: Color(0xFF999999))),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// ショットの種類（フォアハンド・バックハンド・ボレー等）を選ばせる
+  ///
+  /// これも任意入力です。試合中の入力の手を止めたくないためです。
+  Future<String?> _pickShotType() {
+    return showDialog<String?>(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'ショットの種類は？',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF333333)),
+              ),
+              const SizedBox(height: 16),
+              GridView.count(
+                shrinkWrap: true,
+                crossAxisCount: 2,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 2.6,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  for (final type in ShotType.all)
+                    _choiceButton(ctx, ShotType.getDisplay(type), type),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(null),
+                child: const Text('スキップ', style: TextStyle(color: Color(0xFF999999))),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _choiceButton(BuildContext ctx, String label, String value) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton(
+        onPressed: () => Navigator.of(ctx).pop(value),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          side: const BorderSide(color: Color(0xFFEEEEEE)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+        child: Text(label, style: const TextStyle(color: Color(0xFF333333))),
+      ),
+    );
   }
 
   @override

@@ -3,13 +3,13 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:soft_tennis_scoring/config/ai_config.dart';
+import 'package:soft_tennis_scoring/config/local_ai_config.dart';
 import 'package:soft_tennis_scoring/database/database_helper.dart';
-import 'package:soft_tennis_scoring/services/advanced_stats.dart';
 import 'package:soft_tennis_scoring/services/insight_engine.dart';
+import 'package:soft_tennis_scoring/services/local_llm.dart';
 import 'package:soft_tennis_scoring/services/statistics_calculator.dart';
 import 'package:soft_tennis_scoring/services/subscription_service.dart';
 
@@ -18,23 +18,22 @@ import 'package:soft_tennis_scoring/services/subscription_service.dart';
 /// 設計の要点は3つあります。
 ///
 /// 1. **生成は試合を保存した直後にバックグラウンドで行う**。統計画面を開いた
-///    ときに生成すると、開くたびに待ち時間が入り、レート制限がそのまま画面の
-///    エラーになります。保存直後はユーザーが画面を閉じる時間なので、生成時間
-///    を体感させずに済みます。
+///    ときに生成すると、開くたびに待ち時間が入ります。保存直後はユーザーが
+///    画面を閉じる時間なので、生成時間を体感させずに済みます。
 /// 2. **生成結果はDBに持ち、画面は必ずキャッシュから読む**。統計画面は今まで
 ///    どおり即座に開きます。生成が間に合っていなければ、既存のルールベース
 ///    ([InsightEngine]) の文言が出るので、ユーザーは失敗を目にしません。
-/// 3. **課金者のみ**。呼び出し回数が売上に紐づくため、無料ユーザーが増えても
-///    費用は増えません。
+/// 3. **何を言うかはルールベース（[InsightEngine]）が決め切る**。端末内LLM
+///    ([LocalLlm]) の役割は、選ばれたコメントの言い回しを整えることだけです。
+///    小さなモデルに数値の判断まで任せると、根拠のない分析が出てしまいます。
+///    生成は端末内で完結するため、選手名や成績が外部に送られることはありません。
+/// 4. **課金者のみ**。無料ユーザーが増えても端末の処理が増えるだけで、
+///    クラウド費用は発生しません。
 class AiInsightService {
   AiInsightService._(); // インスタンス化を防ぐ
 
   /// 通算分析のキャッシュscope
   static const String scopeOverall = 'overall';
-
-  /// 生成回数の記録に使うSharedPreferencesのキー
-  static const String _quotaDateKey = 'ai_insight_quota_date';
-  static const String _quotaCountKey = 'ai_insight_quota_count';
 
   /// 最後に統計画面で見ていた対象を覚えておくキー
   ///
@@ -62,7 +61,7 @@ class AiInsightService {
   /// このハッシュが一致するキャッシュだけを表示に使うことで、
   /// 画面に出ている数値と食い違う分析が出るのを防ぎます。
   static String statsHash(InsightInput input) {
-    final payload = jsonEncode(_toPayload(input, anonymize: false));
+    final payload = jsonEncode(_toPayload(input));
     return sha256.convert(utf8.encode(payload)).toString();
   }
 
@@ -74,7 +73,7 @@ class AiInsightService {
     StatsSubject subject,
     InsightInput input,
   ) async {
-    if (!AiConfig.isConfigured) return null;
+    if (!LocalAiConfig.isConfigured) return null;
     if (!await _isEntitled()) return null;
 
     final json = await DatabaseHelper.instance.aiInsights.find(
@@ -85,7 +84,7 @@ class AiInsightService {
     if (json == null) return null;
 
     try {
-      return _decodeComments(json, input);
+      return _decodeComments(json);
     } catch (e) {
       debugPrint('AI分析の読み込みに失敗（キャッシュを無視）: $e');
       return null;
@@ -119,7 +118,7 @@ class AiInsightService {
   /// 開いていない場合は、作り直す対象が分からないので何もしません
   /// （その場合は次に統計画面を開いたときに予約が入ります）。
   static Future<void> scheduleGenerationAfterMatchSaved() async {
-    if (!AiConfig.isConfigured) return;
+    if (!LocalAiConfig.isConfigured) return;
 
     final prefs = await SharedPreferences.getInstance();
     final name = prefs.getString(_lastSubjectNameKey);
@@ -136,7 +135,7 @@ class AiInsightService {
   /// たびに生成するとほぼ同じ文章を作っては捨てることになるためです。
   /// 生成の成否は呼び出し側に返しません（失敗してもルールベースが出るため）。
   static void scheduleGeneration(StatsSubject subject) {
-    if (!AiConfig.isConfigured) return;
+    if (!LocalAiConfig.isConfigured) return;
 
     _pendingGeneration?.cancel();
     _pendingGeneration = Timer(AiConfig.generationDelay, () async {
@@ -165,14 +164,14 @@ class AiInsightService {
     StatsSubject subject,
     InsightInput input,
   ) async {
-    if (!AiConfig.isConfigured) return false;
+    if (!LocalAiConfig.isConfigured) return false;
     if (_generating) return false;
     if (!await _isEntitled()) return false;
 
     final hash = statsHash(input);
     final subjectKey = _subjectKey(subject);
 
-    // 同じスタッツの結果が既にあるなら生成しない（最大の節約はこれ）
+    // 同じスタッツの結果が既にあるなら生成しない（作り直す必要がない）
     final existing = await DatabaseHelper.instance.aiInsights.find(
       scope: scopeOverall,
       subject: subjectKey,
@@ -180,32 +179,18 @@ class AiInsightService {
     );
     if (existing != null) return false;
 
-    if (!await _consumeDailyQuota()) {
-      debugPrint('AI分析の生成をスキップ（本日の上限に到達）');
-      return false;
-    }
-
     _generating = true;
     try {
-      final anonymized = _toPayload(input, anonymize: true);
-      final response = await http
-          .post(
-            Uri.parse(AiConfig.endpoint),
-            headers: const {'Content-Type': 'application/json'},
-            body: jsonEncode({'stats': anonymized}),
-          )
-          .timeout(AiConfig.requestTimeout);
-
-      if (response.statusCode != 200) {
-        // 429（レート制限）を含め、失敗は握りつぶす。
-        // 画面にはルールベースの分析が出るので、ユーザーには何も起きない。
-        debugPrint('AI分析の生成に失敗: HTTP ${response.statusCode}');
-        return false;
+      // 何を言うかはルールベースが決め切る。LLMには言い回しだけを頼む。
+      final base = InsightEngine.generate(input);
+      final comments = <Map<String, String>>[];
+      for (final insight in base) {
+        final phrased = await _phrase(insight);
+        comments.add({
+          'type': _typeKey(insight.type),
+          'text': phrased ?? insight.text,
+        });
       }
-
-      // 生成された本文の妥当性をここで確認しておく（壊れた結果を保存しない）
-      final body = utf8.decode(response.bodyBytes);
-      final comments = _extractComments(body);
       if (comments.isEmpty) return false;
 
       await DatabaseHelper.instance.aiInsights.save(
@@ -219,6 +204,64 @@ class AiInsightService {
       _generating = false;
     }
   }
+
+  /// LLMに与える役割の説明
+  ///
+  /// 「新しい情報を足さない」ことを最優先で指示します。小さなモデルは
+  /// 放っておくと、渡していない数値やもっともらしい理由を作り出します。
+  static const String _systemInstruction = 'あなたはソフトテニスの分析コーチです。'
+      '渡されたコメントを、選手が読みやすい自然な日本語に整えます。'
+      '与えられた事実・数値以外は絶対に書き足さないでください。'
+      '出力は120文字以内の1文だけで、前置きも記号も付けないでください。';
+
+  /// 生成結果を表示に使ってよいか確かめる上限（超えたら元の文言に戻す）
+  static const int _maxTextLength = 160;
+
+  /// ルールベースのコメントを、端末内LLMで言い回しだけ整える
+  ///
+  /// 失敗・未設定・タイムアウトのときはnullを返し、呼び出し側は
+  /// [Insight.text]（ルールベースの定型文）をそのまま使います。
+  static Future<String?> _phrase(Insight insight) async {
+    if (!LocalAiConfig.isConfigured) return null;
+
+    try {
+      final generated = await LocalLlm.generate(
+        '次のコメントを、言い回しだけ整えてください。\n'
+        'コメント: ${insight.text}\n'
+        '整えた1文だけを出力してください。',
+        systemInstruction: _systemInstruction,
+        timeout: LocalAiConfig.reviewTimeout,
+        maxTokens: LocalAiConfig.liveMaxTokens,
+      );
+      return _sanitize(generated);
+    } catch (e) {
+      debugPrint('AI分析の言い換えに失敗: $e');
+      return null;
+    }
+  }
+
+  /// 小さなモデルが返しがちな前置き・箇条書き・崩れた出力を弾く
+  static String? _sanitize(String? generated) {
+    if (generated == null) return null;
+
+    var text = generated
+        .split('\n')
+        .map((line) => line.trim())
+        .firstWhere((line) => line.isNotEmpty, orElse: () => '');
+
+    text = text.replaceAll(RegExp(r'^[-*・>「」\s]+'), '').trim();
+    if (text.isEmpty) return null;
+    if (text.length > _maxTextLength) return null;
+    if (!RegExp(r'[ぁ-んァ-ヶ一-龠]').hasMatch(text)) return null;
+
+    return text;
+  }
+
+  static String _typeKey(InsightType type) => switch (type) {
+        InsightType.good => 'good',
+        InsightType.warning => 'warning',
+        InsightType.info => 'info',
+      };
 
   /// AI分析を使ってよい状態か（課金しているか）
   ///
@@ -241,29 +284,17 @@ class AiInsightService {
   // 送信データの組み立て
   // ============================================================================
 
-  /// スタッツを送信用のMapに変換する
-  ///
-  /// [anonymize] がtrueのとき、選手名・対戦相手名を「選手A」「対戦相手A」に
-  /// 置き換えます。**実名を外部APIへ送らないための処理で、必須です。**
-  /// 返ってきた文章は [_decodeComments] で実名に戻します。
+  /// スタッツをハッシュ計算用のMapに変換する
   ///
   /// 数値は小数第1位に丸めます。丸めないと、ごく僅かな違いでハッシュが変わり、
   /// 中身がほぼ同じ分析を作り直してしまいます。
-  static Map<String, dynamic> _toPayload(
-    InsightInput input, {
-    required bool anonymize,
-  }) {
+  static Map<String, dynamic> _toPayload(InsightInput input) {
     double round1(double v) => (v * 10).roundToDouble() / 10;
 
-    final opponents = <Map<String, dynamic>>[];
-    for (var i = 0; i < input.opponents.length; i++) {
-      final o = input.opponents[i];
-      opponents.add({
-        'label': anonymize ? _opponentAlias(i) : o.label,
-        'wins': o.wins,
-        'losses': o.losses,
-      });
-    }
+    final opponents = <Map<String, dynamic>>[
+      for (final o in input.opponents)
+        {'label': o.label, 'wins': o.wins, 'losses': o.losses},
+    ];
 
     final payload = <String, dynamic>{
       'totalMatches': input.totalMatches,
@@ -295,79 +326,26 @@ class AiInsightService {
         'lossStreak3Count': stats.lossStreak3Count,
         'gamePointTotal': stats.gamePointTotal,
         'gamePointWon': stats.gamePointWon,
-        'servers': _serverStats(stats, anonymize: anonymize),
+        'servers': [
+          for (final entry in (stats.serverStats.keys.toList()..sort()))
+            {
+              'name': entry,
+              'total': stats.serverStats[entry]!.total,
+              'won': stats.serverStats[entry]!.won,
+            },
+        ],
       };
     }
 
     return payload;
   }
 
-  /// 選手別サーブ成績（選手名は匿名化の対象）
-  static List<Map<String, dynamic>> _serverStats(
-    AdvancedPointStats stats, {
-    required bool anonymize,
-  }) {
-    final names = stats.serverStats.keys.toList()..sort();
-    final result = <Map<String, dynamic>>[];
-    for (var i = 0; i < names.length; i++) {
-      final stat = stats.serverStats[names[i]];
-      if (stat == null) continue;
-      result.add({
-        'name': anonymize ? _playerAlias(i) : names[i],
-        'total': stat.total,
-        'won': stat.won,
-      });
-    }
-    return result;
-  }
-
-  /// 匿名化に使う対戦相手の呼び名（対戦相手A, B, ...）
-  static String _opponentAlias(int index) => '対戦相手${_alphabet(index)}';
-
-  /// 匿名化に使う選手の呼び名（選手A, B, ...）
-  static String _playerAlias(int index) => '選手${_alphabet(index)}';
-
-  /// 0→A, 1→B ... 25→Z, 26以降は数字を添える
-  static String _alphabet(int index) {
-    if (index < 26) return String.fromCharCode(65 + index);
-    return '${String.fromCharCode(65 + index % 26)}${index ~/ 26 + 1}';
-  }
-
   // ============================================================================
   // 受信データの解釈
   // ============================================================================
 
-  /// プロキシの応答からコメント配列を取り出す
-  ///
-  /// 期待する形は `{"comments": [{"type": "good", "text": "..."}]}` です。
-  /// 想定外の形・空文字のコメントは捨てます（壊れた分析を保存しないため）。
-  static List<Map<String, String>> _extractComments(String body) {
-    final decoded = jsonDecode(body);
-    if (decoded is! Map<String, dynamic>) return const [];
-    final raw = decoded['comments'];
-    if (raw is! List) return const [];
-
-    const allowedTypes = {'good', 'warning', 'info'};
-    final comments = <Map<String, String>>[];
-    for (final item in raw) {
-      if (item is! Map) continue;
-      final text = (item['text'] as Object?)?.toString().trim() ?? '';
-      if (text.isEmpty) continue;
-      final type = (item['type'] as Object?)?.toString() ?? 'info';
-      comments.add({
-        'type': allowedTypes.contains(type) ? type : 'info',
-        'text': text,
-      });
-    }
-    return comments;
-  }
-
   /// キャッシュのJSONを[Insight]のリストへ戻す
-  ///
-  /// 匿名化した呼び名（対戦相手A・選手A）を実名へ復元します。
-  static List<Insight> _decodeComments(String json, InsightInput input) {
-    final restore = _restoreMap(input);
-
+  static List<Insight> _decodeComments(String json) {
     final decoded = jsonDecode(json);
     if (decoded is! List) return const [];
 
@@ -375,11 +353,8 @@ class AiInsightService {
     for (var i = 0; i < decoded.length; i++) {
       final item = decoded[i];
       if (item is! Map) continue;
-      var text = (item['text'] as Object?)?.toString() ?? '';
+      final text = (item['text'] as Object?)?.toString() ?? '';
       if (text.isEmpty) continue;
-      restore.forEach((alias, real) {
-        text = text.replaceAll(alias, real);
-      });
 
       insights.add(Insight(
         type: switch (item['type']) {
@@ -387,48 +362,11 @@ class AiInsightService {
           'warning' => InsightType.warning,
           _ => InsightType.info,
         },
-        // 生成された順をそのまま表示順にする（AI側に優先度を決めさせる）
+        // 生成された順をそのまま表示順にする
         priority: decoded.length - i,
         text: text,
       ));
     }
     return insights;
-  }
-
-  /// 匿名の呼び名 → 実名の対応表
-  static Map<String, String> _restoreMap(InsightInput input) {
-    final map = <String, String>{};
-    for (var i = 0; i < input.opponents.length; i++) {
-      map[_opponentAlias(i)] = input.opponents[i].label;
-    }
-    final stats = input.pointStats;
-    if (stats != null) {
-      final names = stats.serverStats.keys.toList()..sort();
-      for (var i = 0; i < names.length; i++) {
-        map[_playerAlias(i)] = names[i];
-      }
-    }
-    return map;
-  }
-
-  // ============================================================================
-  // 1日の生成回数の上限
-  // ============================================================================
-
-  /// 本日ぶんの生成枠を1つ使う
-  ///
-  /// 上限に達していればfalseを返します。不具合や連打で課金が跳ねるのを
-  /// 防ぐための安全弁で、サーバー側にも同じ制限を置いてあります。
-  static Future<bool> _consumeDailyQuota() async {
-    final prefs = await SharedPreferences.getInstance();
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-
-    final savedDate = prefs.getString(_quotaDateKey);
-    final count = savedDate == today ? (prefs.getInt(_quotaCountKey) ?? 0) : 0;
-    if (count >= AiConfig.maxGenerationsPerDay) return false;
-
-    await prefs.setString(_quotaDateKey, today);
-    await prefs.setInt(_quotaCountKey, count + 1);
-    return true;
   }
 }

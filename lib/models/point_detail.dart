@@ -45,6 +45,15 @@ class PointDetail {
   /// アクションを起こした選手名（ウィナーを決めた人、ミスした人など）
   final String? actionPlayer;
 
+  /// ミスの種類（'net'=ネット, 'out'=アウト, 'double_fault'=ダブルフォルト）
+  /// pointType が 'opponent_error' のときだけ意味を持つ。null: 未入力
+  final String? errorType;
+
+  /// ショットの種類（'forehand'=フォアハンド, 'backhand'=バックハンド,
+  /// 'volley'=ボレー, 'smash'=スマッシュ, 'lob'=ロブ, 'serve'=サーブ）
+  /// ウィナー・ミスどちらでも使う（何のショットで決まった/崩れたか）。null: 未入力
+  final String? shotType;
+
   /// 作成日時
   final DateTime createdAt;
 
@@ -59,6 +68,8 @@ class PointDetail {
     required this.pointWinner,
     required this.pointType,
     this.actionPlayer,
+    this.errorType,
+    this.shotType,
     required this.createdAt,
   });
 
@@ -75,6 +86,8 @@ class PointDetail {
       'point_winner': pointWinner,
       'point_type': pointType,
       'action_player': actionPlayer,
+      'error_type': errorType,
+      'shot_type': shotType,
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -92,6 +105,8 @@ class PointDetail {
       pointWinner: map['point_winner'] as String,
       pointType: map['point_type'] as String,
       actionPlayer: map['action_player'] as String?,
+      errorType: map['error_type'] as String?,
+      shotType: map['shot_type'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
     );
   }
@@ -131,6 +146,8 @@ class PointDetail {
     String? pointWinner,
     String? pointType,
     String? actionPlayer,
+    String? errorType,
+    String? shotType,
     DateTime? createdAt,
   }) {
     return PointDetail(
@@ -144,6 +161,8 @@ class PointDetail {
       pointWinner: pointWinner ?? this.pointWinner,
       pointType: pointType ?? this.pointType,
       actionPlayer: actionPlayer ?? this.actionPlayer,
+      errorType: errorType ?? this.errorType,
+      shotType: shotType ?? this.shotType,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -181,6 +200,63 @@ class PointType {
         return '相手のエラーで得点';
       default:
         return '';
+    }
+  }
+}
+
+/// ミスの種類の定数（pointType が 'opponent_error' のときに使う）
+class ErrorType {
+  static const String net = 'net';
+  static const String out = 'out';
+  static const String doubleFault = 'double_fault';
+
+  /// 全てのミス種類
+  static const List<String> all = [net, out, doubleFault];
+
+  /// 日本語表示を取得
+  static String getDisplay(String type) {
+    switch (type) {
+      case net:
+        return 'ネット';
+      case out:
+        return 'アウト';
+      case doubleFault:
+        return 'ダブルフォルト';
+      default:
+        return type;
+    }
+  }
+}
+
+/// ショットの種類の定数（ウィナー・ミスどちらにも使う）
+class ShotType {
+  static const String forehand = 'forehand';
+  static const String backhand = 'backhand';
+  static const String volley = 'volley';
+  static const String smash = 'smash';
+  static const String lob = 'lob';
+  static const String serve = 'serve';
+
+  /// 全てのショット種類
+  static const List<String> all = [forehand, backhand, volley, smash, lob, serve];
+
+  /// 日本語表示を取得
+  static String getDisplay(String type) {
+    switch (type) {
+      case forehand:
+        return 'フォアハンド';
+      case backhand:
+        return 'バックハンド';
+      case volley:
+        return 'ボレー';
+      case smash:
+        return 'スマッシュ';
+      case lob:
+        return 'ロブ';
+      case serve:
+        return 'サーブ';
+      default:
+        return type;
     }
   }
 }
