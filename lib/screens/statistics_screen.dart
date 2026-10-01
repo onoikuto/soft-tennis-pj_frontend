@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:soft_tennis_scoring/database/database_helper.dart';
 import 'package:soft_tennis_scoring/models/match.dart';
-import 'package:soft_tennis_scoring/models/game_score.dart';
 import 'package:soft_tennis_scoring/services/advanced_stats.dart';
 import 'package:soft_tennis_scoring/services/ai_insight_service.dart';
 import 'package:soft_tennis_scoring/services/insight_engine.dart';
@@ -22,7 +21,6 @@ import 'package:soft_tennis_scoring/widgets/statistics/service_receive_card.dart
 import 'package:soft_tennis_scoring/widgets/statistics/total_stats_card.dart';
 import 'package:soft_tennis_scoring/widgets/statistics/upgrade_prompt_card.dart';
 import 'package:soft_tennis_scoring/widgets/statistics/win_rate_trend_card.dart';
-import 'package:intl/intl.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
 class StatisticsScreen extends StatefulWidget {
@@ -449,8 +447,6 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                                   ServeDetailCard(stats: _advancedPointStats),
                                   const SizedBox(height: 16),
                                   MomentumCard(stats: _advancedPointStats),
-                                ],
-                                if (_hasPointDetails) ...[
                                 ],
                                 const SizedBox(height: 16),
                                 // タブごとのAIアドバイス

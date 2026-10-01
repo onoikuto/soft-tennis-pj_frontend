@@ -37,6 +37,22 @@ AdvancedPointStats _stats(List<PointDetail> points) => AdvancedPointStats()
   );
 
 void main() {
+  group('PairReport.copyWith', () {
+    test('一言だけ差し替えても相手ペアの傾向が残る', () {
+      const original = PairReport(
+        players: [PlayerReport(name: '佐藤', bad: 'バックハンドで3失点。')],
+        summary: 'ウィナー2本・ミス5本。ミスのほうが多い。',
+        opponent: OpponentReport(weakness: 'ロブでミスが出やすい。'),
+      );
+
+      final phrased = original.copyWith(summary: 'ミスが先行しています。');
+
+      expect(phrased.summary, 'ミスが先行しています。');
+      expect(phrased.opponent?.weakness, 'ロブでミスが出やすい。');
+      expect(phrased.players.single.name, '佐藤');
+    });
+  });
+
   group('PairReport', () {
     test('選手ごとにGoodとBadを組み立てる', () {
       final points = [

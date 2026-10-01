@@ -174,7 +174,11 @@ class StatsAdviceEngine {
   // ============================================================================
 
   static void _addPractice(InsightInput input, List<StatsAdvice> out) {
-    if (input.hasPointDetails && input.firstServeInRate < 60) {
+    // ポイント詳細があることと、本人のサーブが記録されていることは別です。
+    // 本数で見ないと、一度もサーブを打っていない人に「成功率0%」と言ってしまいます。
+    if (input.hasPointDetails &&
+        input.firstServeTotal >= 20 &&
+        input.firstServeInRate < 60) {
       out.add(StatsAdvice(
         category: StatsAdviceCategory.practice,
         fact: '1stサーブの成功率が${input.firstServeInRate.round()}%。',
@@ -184,7 +188,10 @@ class StatsAdviceEngine {
       ));
     }
 
-    if (input.serviceWinRate > 0 && input.serviceWinRate < 45) {
+    // ゲーム数で材料の有無を見ます。取得率そのものを条件にすると、
+    // サーブ側を全部落としている（0%）一番ひどい状態が抜け落ちます。
+    // 逆に試合数で見ると、ゲーム単位の記録が無い試合でも0%と断定してしまいます。
+    if (input.serviceTotal >= 10 && input.serviceWinRate < 45) {
       out.add(StatsAdvice(
         category: StatsAdviceCategory.practice,
         fact: 'サーブ側でのゲーム取得率が${input.serviceWinRate.round()}%。',
@@ -194,7 +201,7 @@ class StatsAdviceEngine {
       ));
     }
 
-    if (input.receiveWinRate > 0 && input.receiveWinRate < 35) {
+    if (input.receiveTotal >= 10 && input.receiveWinRate < 35) {
       out.add(StatsAdvice(
         category: StatsAdviceCategory.practice,
         fact: 'レシーブ側でのゲーム取得率が${input.receiveWinRate.round()}%。',

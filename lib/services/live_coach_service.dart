@@ -61,7 +61,7 @@ class LiveCoachService {
       return GameReportMessage(report: report, phrasedByAi: false);
     }
     return GameReportMessage(
-      report: PairReport(players: report.players, summary: phrased),
+      report: report.copyWith(summary: phrased),
       phrasedByAi: true,
     );
   }

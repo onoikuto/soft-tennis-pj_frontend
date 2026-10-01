@@ -42,6 +42,14 @@ class InsightInput {
   final double serviceWinRate;
   final double receiveWinRate;
 
+  /// その取得率の母数（ゲーム数）
+  ///
+  /// 取得率は母数0のとき0%として返るので、率だけでは「全部落とした」と
+  /// 「そもそも記録が無い」を区別できません。判定には必ずこちらを使います。
+  /// 渡し漏れたときは何も言わない側に倒すため、既定値は0にしてあります。
+  final int serviceTotal;
+  final int receiveTotal;
+
   final double deuceWinRate;
   final int deuceTotal;
 
@@ -51,6 +59,12 @@ class InsightInput {
   /// ポイント詳細データがあるか（分析+で記録された試合）
   final bool hasPointDetails;
   final double firstServeInRate;
+
+  /// 1stサーブ成功率の母数（本人が打ったサーブの本数）
+  ///
+  /// ポイント詳細があっても、個人単位では本人がサーブを打っていない試合が
+  /// ありえます。そのとき成功率は0%として返るので、判定にはこちらを使います。
+  final int firstServeTotal;
   final AdvancedPointStats? pointStats;
 
   final List<OpponentRecord> opponents;
@@ -61,12 +75,15 @@ class InsightInput {
     required this.recentResults,
     required this.serviceWinRate,
     required this.receiveWinRate,
+    this.serviceTotal = 0,
+    this.receiveTotal = 0,
     required this.deuceWinRate,
     required this.deuceTotal,
     required this.finalGameWinRate,
     required this.finalGameTotal,
     required this.hasPointDetails,
     required this.firstServeInRate,
+    this.firstServeTotal = 0,
     required this.pointStats,
     required this.opponents,
   });
@@ -138,6 +155,8 @@ class InsightEngine {
   /// サーブ・レシーブのバランスに関するコメント
   static void _addServeReceiveInsights(InsightInput input, List<Insight> insights) {
     if (input.totalMatches < 5) return;
+    // 片方でも母数が無ければ、差は0%との比較になってしまう
+    if (input.serviceTotal < 10 || input.receiveTotal < 10) return;
 
     final gap = input.serviceWinRate - input.receiveWinRate;
     if (gap >= 15) {
@@ -196,8 +215,10 @@ class InsightEngine {
     if (!input.hasPointDetails || stats == null) return;
 
     // 1stサーブ成功率
-    if (stats.firstServePointTotal + stats.secondServePointTotal >= 30 &&
-        input.firstServeInRate < 60) {
+    // 母数は本人（個人タブ）のサーブ本数で見ます。ポイント詳細の集計は
+    // チーム単位なので、そちらを条件にすると本人が一度も打っていなくても
+    // 「成功率0%」と断定してしまいます。
+    if (input.firstServeTotal >= 20 && input.firstServeInRate < 60) {
       insights.add(Insight(
         type: InsightType.warning,
         text: '1stサーブの成功率が${input.firstServeInRate.toStringAsFixed(0)}%と低めです。まずは8割の力で確実に入れて、2ndサーブの場面自体を減らしましょう。',

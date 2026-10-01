@@ -9,12 +9,22 @@ class DataInsightsCard extends StatelessWidget {
   final double serviceWinRate;
   final double receiveWinRate;
 
+  /// 取得率の母数（ゲーム数）
+  ///
+  /// 取得率は母数0のとき0%として返るので、率だけでは「全部落とした」と
+  /// 「そもそも記録が無い」を区別できません。比較には必ずこちらを使います。
+  /// 渡し漏れたときは断定しない側に倒すため、既定値は0にしてあります。
+  final int serviceTotal;
+  final int receiveTotal;
+
   const DataInsightsCard({
     super.key,
     required this.gameWinRates,
     required this.winRate,
     required this.serviceWinRate,
     required this.receiveWinRate,
+    this.serviceTotal = 0,
+    this.receiveTotal = 0,
   });
 
   @override
@@ -41,7 +51,11 @@ class DataInsightsCard extends StatelessWidget {
     }
 
     String adviceText = '';
-    if (serviceWinRate > receiveWinRate + 10) {
+    final bool hasServeReceiveData = serviceTotal >= 10 && receiveTotal >= 10;
+    if (!hasServeReceiveData) {
+      // 片方でも母数が無いと、0%との比較になって必ず差が出てしまいます。
+      adviceText = 'ゲームごとの記録がたまると、サーブ・レシーブの傾向をお伝えできます。';
+    } else if (serviceWinRate > receiveWinRate + 10) {
       adviceText =
           'サーブ時の取得率が非常に高い（${serviceWinRate.toStringAsFixed(0)}%）ため、サービスゲームを確実にキープする戦術を維持しましょう。一方でレシーブ時は相手のセカンドサーブをより積極的に攻めることで、全体の勝率をさらに高められます。';
     } else if (receiveWinRate > serviceWinRate + 10) {

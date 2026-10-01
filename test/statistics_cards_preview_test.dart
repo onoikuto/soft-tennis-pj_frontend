@@ -56,6 +56,8 @@ void main() {
       recentResults: [true, false, false, false, false, true],
       serviceWinRate: 68,
       receiveWinRate: 41,
+      serviceTotal: 44,
+      receiveTotal: 41,
       deuceWinRate: 35,
       deuceTotal: 10,
       finalGameWinRate: 50,

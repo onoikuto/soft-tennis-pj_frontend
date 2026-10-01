@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:soft_tennis_scoring/models/game_score.dart';
 import 'package:soft_tennis_scoring/models/point_detail.dart';
 import 'package:soft_tennis_scoring/services/advanced_stats.dart';
 import 'package:soft_tennis_scoring/services/insight_engine.dart';
@@ -147,7 +146,13 @@ void main() {
       List<bool>? recentResults,
       double serviceWinRate = 50,
       double receiveWinRate = 50,
+      int serviceTotal = 40,
+      int receiveTotal = 40,
       int totalMatches = 10,
+      bool hasPointDetails = false,
+      double firstServeInRate = 0,
+      int firstServeTotal = 0,
+      AdvancedPointStats? pointStats,
     }) {
       return InsightInput(
         totalMatches: totalMatches,
@@ -155,13 +160,16 @@ void main() {
         recentResults: recentResults ?? [],
         serviceWinRate: serviceWinRate,
         receiveWinRate: receiveWinRate,
+        serviceTotal: serviceTotal,
+        receiveTotal: receiveTotal,
         deuceWinRate: 50,
         deuceTotal: 0,
         finalGameWinRate: 50,
         finalGameTotal: 0,
-        hasPointDetails: false,
-        firstServeInRate: 0,
-        pointStats: null,
+        hasPointDetails: hasPointDetails,
+        firstServeInRate: firstServeInRate,
+        firstServeTotal: firstServeTotal,
+        pointStats: pointStats,
         opponents: const [],
       );
     }
@@ -181,6 +189,44 @@ void main() {
         insights.any((i) => i.type == InsightType.warning && i.text.contains('レシーブ')),
         isTrue,
       );
+    });
+
+    test('ゲーム単位の記録が無ければ取得率差のコメントは出さない', () {
+      // 母数0のとき取得率は0%で返るので、率だけを見ると差が出たように見える
+      final insights = InsightEngine.generate(
+        baseInput(
+          serviceWinRate: 70,
+          receiveWinRate: 0,
+          receiveTotal: 0,
+        ),
+      );
+      expect(insights.any((i) => i.text.contains('ゲーム取得率')), isFalse);
+    });
+
+    test('本人のサーブが記録されていなければ1stサーブのコメントは出さない', () {
+      // ポイント詳細はチーム単位で集計されるので、個人タブでは本人が
+      // 一度も打っていなくても成功率が0%として返ってくる。
+      final insights = InsightEngine.generate(
+        baseInput(
+          hasPointDetails: true,
+          pointStats: AdvancedPointStats(),
+          firstServeInRate: 0,
+          firstServeTotal: 0,
+        ),
+      );
+      expect(insights.any((i) => i.text.contains('1stサーブの成功率')), isFalse);
+    });
+
+    test('本人のサーブが十分あれば1stサーブのコメントを出す', () {
+      final insights = InsightEngine.generate(
+        baseInput(
+          hasPointDetails: true,
+          pointStats: AdvancedPointStats(),
+          firstServeInRate: 45,
+          firstServeTotal: 40,
+        ),
+      );
+      expect(insights.any((i) => i.text.contains('1stサーブの成功率')), isTrue);
     });
 
     test('データが少ない場合はフォールバックのコメントが出る', () {

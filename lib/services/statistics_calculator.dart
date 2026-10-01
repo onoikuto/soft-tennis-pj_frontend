@@ -316,12 +316,15 @@ class StatisticsCalculator {
         recentResults: recentResults,
         serviceWinRate: serviceWinRate,
         receiveWinRate: receiveWinRate,
+        serviceTotal: serviceTotal,
+        receiveTotal: receiveTotal,
         deuceWinRate: deuceWinRate,
         deuceTotal: deuceTotal,
         finalGameWinRate: finalGameWinRate,
         finalGameTotal: finalGameTotal,
         hasPointDetails: detailed.hasPointDetails,
         firstServeInRate: detailed.firstServeInRate,
+        firstServeTotal: detailed.firstServeTotal,
         pointStats: detailed.hasPointDetails ? detailed.advancedStats : null,
         opponents: opponentRecords,
       ),
@@ -408,6 +411,7 @@ class StatisticsCalculator {
       firstServeInRate: firstServeTotalCount == 0
           ? 0.0
           : firstServeInCount / firstServeTotalCount * 100,
+      firstServeTotal: firstServeTotalCount,
       firstServePointRate: firstServePointTotalCount == 0
           ? 0.0
           : firstServePointWinCount / firstServePointTotalCount * 100,
@@ -422,6 +426,9 @@ class StatisticsCalculator {
 class _DetailedStats {
   final bool hasPointDetails;
   final double firstServeInRate;
+
+  /// 1stサーブ成功率の母数（本人／自チームが打ったサーブの本数）
+  final int firstServeTotal;
   final double firstServePointRate;
   final int winnerCount;
   final int myErrorCount;
@@ -430,6 +437,7 @@ class _DetailedStats {
   const _DetailedStats({
     required this.hasPointDetails,
     required this.firstServeInRate,
+    this.firstServeTotal = 0,
     required this.firstServePointRate,
     required this.winnerCount,
     required this.myErrorCount,

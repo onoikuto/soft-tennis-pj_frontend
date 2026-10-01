@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:soft_tennis_scoring/models/point_detail.dart';
 import 'package:soft_tennis_scoring/services/advanced_stats.dart';
 import 'package:soft_tennis_scoring/services/insight_engine.dart';
 import 'package:soft_tennis_scoring/services/stats_advice.dart';
@@ -10,8 +9,11 @@ InsightInput _input({
   double finalGameWinRate = 60,
   int finalGameTotal = 0,
   double firstServeInRate = 80,
+  int firstServeTotal = 40,
   double serviceWinRate = 60,
   double receiveWinRate = 50,
+  int serviceTotal = 40,
+  int receiveTotal = 40,
   bool hasPointDetails = true,
   AdvancedPointStats? pointStats,
   List<OpponentRecord> opponents = const [],
@@ -24,12 +26,15 @@ InsightInput _input({
       recentResults: const [],
       serviceWinRate: serviceWinRate,
       receiveWinRate: receiveWinRate,
+      serviceTotal: serviceTotal,
+      receiveTotal: receiveTotal,
       deuceWinRate: deuceWinRate,
       deuceTotal: deuceTotal,
       finalGameWinRate: finalGameWinRate,
       finalGameTotal: finalGameTotal,
       hasPointDetails: hasPointDetails,
       firstServeInRate: firstServeInRate,
+      firstServeTotal: firstServeTotal,
       pointStats: pointStats,
       opponents: opponents,
     );
@@ -96,6 +101,26 @@ void main() {
 
       expect(advices.where((a) => a.fact.contains('1stサーブ')), isEmpty);
     });
+
+    test('本人のサーブが記録されていなければ1stサーブは見ない', () {
+      // ポイント詳細はあるが本人が一度もサーブを打っていない場合、
+      // 成功率は0%として返る。ここで指摘すると事実と違う断定になる。
+      final advices = StatsAdviceEngine.generate(
+        StatsAdviceEngine.viewPlayer,
+        _input(firstServeInRate: 0, firstServeTotal: 0),
+      );
+
+      expect(advices.where((a) => a.fact.contains('1stサーブ')), isEmpty);
+    });
+
+    test('サーブの本数が少なければ1stサーブは見ない', () {
+      final advices = StatsAdviceEngine.generate(
+        StatsAdviceEngine.viewPlayer,
+        _input(firstServeInRate: 40, firstServeTotal: 8),
+      );
+
+      expect(advices.where((a) => a.fact.contains('1stサーブ')), isEmpty);
+    });
   });
 
   group('StatsAdviceEngine タブごとの違い', () {
@@ -157,6 +182,46 @@ void main() {
       StatsAdviceEngine.generate(StatsAdviceEngine.viewPair, _input()),
       isEmpty,
     );
+  });
+
+  test('サーブ側を全部落としている（0%）ときも指摘する', () {
+    final advices = StatsAdviceEngine.generate(
+      StatsAdviceEngine.viewPair,
+      _input(serviceWinRate: 0, receiveWinRate: 0),
+    );
+
+    expect(advices.any((a) => a.fact.contains('サーブ側')), isTrue);
+    expect(advices.any((a) => a.fact.contains('レシーブ側')), isTrue);
+  });
+
+  test('ゲーム単位の記録が無ければサーブ・レシーブは指摘しない', () {
+    // 取得率は母数0でも0%として返ってくるので、率だけを見ると
+    // 「全部落とした」と誤って断定してしまう。
+    final advices = StatsAdviceEngine.generate(
+      StatsAdviceEngine.viewPair,
+      _input(
+        serviceWinRate: 0,
+        receiveWinRate: 0,
+        serviceTotal: 0,
+        receiveTotal: 0,
+      ),
+    );
+
+    expect(advices, isEmpty);
+  });
+
+  test('ゲーム数が少なければサーブ・レシーブは指摘しない', () {
+    final advices = StatsAdviceEngine.generate(
+      StatsAdviceEngine.viewPair,
+      _input(
+        serviceWinRate: 0,
+        receiveWinRate: 0,
+        serviceTotal: 6,
+        receiveTotal: 6,
+      ),
+    );
+
+    expect(advices, isEmpty);
   });
 
   test('件数は上限で打ち切る', () {

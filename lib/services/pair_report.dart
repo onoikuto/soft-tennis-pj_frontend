@@ -46,6 +46,23 @@ class PairReport {
 
   const PairReport({required this.players, this.summary, this.opponent});
 
+  /// 一部だけ差し替えた写しを作る
+  ///
+  /// 言い回しを整えた一言で差し替えるときなど、**渡さなかった項目は元のまま
+  /// 残します。** コンストラクタを直接呼び直すと、書き忘れた項目が黙って
+  /// 消えます（相手ペアの傾向が実際にそれで消えていました）。
+  PairReport copyWith({
+    List<PlayerReport>? players,
+    String? summary,
+    OpponentReport? opponent,
+  }) {
+    return PairReport(
+      players: players ?? this.players,
+      summary: summary ?? this.summary,
+      opponent: opponent ?? this.opponent,
+    );
+  }
+
   /// 表示するものがあるか
   bool get hasContent =>
       players.any((p) => p.hasContent) ||
